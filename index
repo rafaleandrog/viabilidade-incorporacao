@@ -18,7 +18,7 @@ import streamlit as st
 # Configuração
 # ============================================================
 
-APP_TITLE = "Viabilidade Imobiliária — Estudo Preliminar"
+APP_TITLE = "Testes IA & AppScript"
 SPREADSHEET_ID = "17zSQ-CdCx9llm1pltkOC8XFXW3hWY751vw6xkl1MYjA"
 WORKSHEET_NAME = "viabilidade"
 
