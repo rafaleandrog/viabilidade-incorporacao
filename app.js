@@ -300,52 +300,33 @@ function homeView() {
           <h1>Viabilidade Imobiliária</h1>
           <p>Selecione a fase do estudo para iniciar a análise.</p>
         </div>
-        <div class="btn-row">
-          <button class="btn orange" onclick="openBenchmarks()">Benchmark</button>
-        </div>
       </div>
 
       <div class="container">
-        <div class="card-grid-2">
-          <div>
-            <div class="card-grid-3">
-              <div class="phase-card available" onclick="setView('projectType', { phase: 'estudo_preliminar' })">
-                <div class="icon">🏗️</div>
-                <h3>Estudo Preliminar</h3>
-                <p>Análise inicial de viabilidade com dados básicos do terreno e indicadores econômico-financeiros.</p>
-                <span class="badge ok">DISPONÍVEL</span>
-              </div>
-
-              <div class="phase-card">
-                <div class="icon">📐</div>
-                <h3 style="color:#999">Pré-Projeto</h3>
-                <p style="color:#b1b1b1">Estrutura preparada para evolução futura.</p>
-                <span class="badge wait">EM BREVE</span>
-              </div>
-
-              <div class="phase-card available" onclick="openBenchmarks()">
-                <div class="icon">📊</div>
-                <h3>Benchmark</h3>
-                <p>Cadastre benchmarks urbanísticos e financeiros para Loteamento, Horizontal e Vertical.</p>
-                <span class="badge ok">EDITÁVEL</span>
-              </div>
-            </div>
+        <div class="home-section-label">Fases do estudo</div>
+        <div class="card-grid-3" style="margin-bottom:28px">
+          <div class="phase-card available" onclick="setView('projectType', { phase: 'estudo_preliminar' })">
+            <div class="icon">🏗️</div>
+            <h3>Estudo Preliminar</h3>
+            <p>Análise inicial de viabilidade com dados básicos do terreno e indicadores econômico-financeiros.</p>
+            <span class="badge ok">DISPONÍVEL</span>
           </div>
 
-          <div class="section">
-            <div class="section-head head-orange">Resumo da arquitetura atual</div>
-            <div class="section-body">
-              <div class="notice">
-                Nesta versão, o HTML + CSS + JS já faz os cálculos automáticos, exportações e envio para Google Sheets via Apps Script.
-              </div>
-              <div class="spacer"></div>
-              <div class="list-table">
-                <div class="row"><div class="label">Frontend</div><div class="num">HTML + CSS + JS</div></div>
-                <div class="row"><div class="label">Persistência local</div><div class="num">localStorage</div></div>
-                <div class="row"><div class="label">Integração externa</div><div class="num">Apps Script</div></div>
-                <div class="row"><div class="label">Planilha</div><div class="num">Google Sheets</div></div>
-              </div>
-            </div>
+          <div class="phase-card">
+            <div class="icon">📐</div>
+            <h3 style="color:#999">Pré-Projeto</h3>
+            <p style="color:#b1b1b1">Estrutura preparada para evolução futura.</p>
+            <span class="badge wait">EM BREVE</span>
+          </div>
+        </div>
+
+        <div class="home-section-label">Configurações</div>
+        <div class="card-grid-3">
+          <div class="phase-card available" onclick="openBenchmarks()">
+            <div class="icon">📊</div>
+            <h3>Benchmark</h3>
+            <p>Cadastre benchmarks urbanísticos e financeiros para Loteamento, Horizontal e Vertical.</p>
+            <span class="badge ok">EDITÁVEL</span>
           </div>
         </div>
       </div>
@@ -412,17 +393,18 @@ function loteamentoView() {
         <div class="field">
           <label>Nome do estudo</label>
           <div class="input-wrap full" style="max-width:780px">
-            <input class="inp text" type="text" value="${state.study.nomeEstudo}" data-path="nomeEstudo" placeholder="Ex: Loteamento Jardim das Flores — Vespasiano/MG" />
+            <input class="inp text" type="text" value="${state.study.nomeEstudo}" data-path="nomeEstudo" />
           </div>
         </div>
 
         <div class="field">
           <label>Cidade / referência</label>
           <div class="input-wrap full" style="max-width:540px">
-            <input class="inp text" type="text" value="${state.study.cidade}" data-path="cidade" placeholder="Ex: Vespasiano/MG" />
+            <input class="inp text" type="text" value="${state.study.cidade}" data-path="cidade" />
           </div>
         </div>
 
+        <!-- Seções 1 e 2 à esquerda, indicadores à direita -->
         <div class="card-grid-2">
           <div>
             <div class="section">
@@ -442,9 +424,7 @@ function loteamentoView() {
                   <div class="value-inline">${fmt(c.areaNaoEd)} m²</div>
                 </div>
                 <div class="highlight" style="background:var(--primary)">
-                  <div>
-                    <div class="title">Área loteável</div>
-                  </div>
+                  <div><div class="title">Área loteável</div></div>
                   <div style="text-align:right">
                     <div class="val">${fmt(c.areaLoteavel)}</div>
                     <div class="sub">m² · ${pc(c.areaLoteavelPct)}</div>
@@ -469,54 +449,11 @@ function loteamentoView() {
                   <div class="value-inline">${fmt(c.areaViario)} m²</div>
                 </div>
                 <div class="highlight" style="background:var(--green)">
-                  <div>
-                    <div class="title">Área dos lotes (vendável)</div>
-                  </div>
+                  <div><div class="title">Área dos lotes (vendável)</div></div>
                   <div style="text-align:right">
                     <div class="val">${fmt(c.areaLotesVend)}</div>
                     <div class="sub">m² · ${pc(c.areaLotesSobreLoteavelPct)}</div>
                   </div>
-                </div>
-              </div>
-            </div>
-
-            <div class="section">
-              <div class="section-head head-primary">3. Parâmetros do produto e preço</div>
-              <div class="section-body">
-                <div class="form-row-3">
-                  ${inputField("Número de lotes", "product.nLotes", state.study.product.nLotes)}
-                  ${inputField("Área média do lote", "product.areaMedia", state.study.product.areaMedia, { suffix: "m²" })}
-                  ${inputField("Preço de venda", "product.precoM2", state.study.product.precoM2, { prefix: "R$", suffix: "/m²" })}
-                </div>
-                <div class="form-row-3">
-                  ${inputField("Permuta física", "costs.permFisicaPct", state.study.costs.permFisicaPct, { suffix: "%" })}
-                  ${inputField("Permuta financeira", "costs.permFinPct", state.study.costs.permFinPct, { suffix: "%" })}
-                  ${inputField("Terreno", "costs.terrenoM2", state.study.costs.terrenoM2, { prefix: "R$", suffix: "/m² área total" })}
-                </div>
-              </div>
-            </div>
-
-            <div class="section">
-              <div class="section-head head-orange">4. Estrutura de custos</div>
-              <div class="section-body">
-                <div class="form-row-3">
-                  ${inputField("Infraestrutura", "costs.infraM2", state.study.costs.infraM2, { prefix: "R$", suffix: "/m² loteável" })}
-                  ${inputField("Projeto e licenciamento", "costs.projetoR", state.study.costs.projetoR, { prefix: "R$" })}
-                  ${inputField("Registro", "costs.registroR", state.study.costs.registroR, { prefix: "R$" })}
-                </div>
-                <div class="form-row-3">
-                  ${inputField("Manutenção pós-obra", "costs.manutPosPct", state.study.costs.manutPosPct, { suffix: "% infra" })}
-                  ${inputField("Marketing e vendas", "costs.marketingPct", state.study.costs.marketingPct, { suffix: "% VGV" })}
-                  ${inputField("Corretagem", "costs.corretagemPct", state.study.costs.corretagemPct, { suffix: "% VGV" })}
-                </div>
-                <div class="form-row-3">
-                  ${inputField("Administração e gestão", "costs.adminPct", state.study.costs.adminPct, { suffix: "% VGV" })}
-                  ${inputField("Impostos sobre vendas", "costs.impostosPct", state.study.costs.impostosPct, { suffix: "% VGV" })}
-                  ${inputField("House comercial (R$/mês)", "costs.houseMes", state.study.costs.houseMes, { prefix: "R$" })}
-                </div>
-                <div class="form-row-2">
-                  ${inputField("Nº de corretores", "costs.houseCorretores", state.study.costs.houseCorretores)}
-                  ${inputField("Meses", "costs.houseMeses", state.study.costs.houseMeses)}
                 </div>
               </div>
             </div>
@@ -538,7 +475,7 @@ function loteamentoView() {
                 </div>
                 <div class="spacer"></div>
                 <div class="notice">
-                  Benchmark Loteamento — Margem Final: <strong>${pc(bm.financial.margemFinalPct)}</strong> · Custo Obras: <strong>${pc(bm.financial.custoObrasPct)}</strong> · Preço de Venda: <strong>R$ ${fmt(bm.financial.precoVendaM2)}</strong>/m²
+                  Benchmark — Margem Final: <strong>${pc(bm.financial.margemFinalPct)}</strong> · Margem Operacional: <strong>${pc(bm.financial.margemOperacionalPct)}</strong> · Custo Obras: <strong>${pc(bm.financial.custoObrasPct)}</strong>
                 </div>
               </div>
             </div>
@@ -555,9 +492,54 @@ function loteamentoView() {
           </div>
         </div>
 
-        <div class="card-grid-2 bottom">
+        <!-- Seções 3 e 4 lado a lado -->
+        <div class="card-grid-2" style="margin-top:18px">
           <div class="section">
-            <div class="section-head head-primary">Proforma e indicadores financeiros</div>
+            <div class="section-head head-primary">3. Parâmetros do produto e preço</div>
+            <div class="section-body">
+              <div class="form-row-3">
+                ${inputField("Número de lotes", "product.nLotes", state.study.product.nLotes)}
+                ${inputField("Área média do lote", "product.areaMedia", state.study.product.areaMedia, { suffix: "m²" })}
+                ${inputField("Preço de venda", "product.precoM2", state.study.product.precoM2, { prefix: "R$", suffix: "/m²" })}
+              </div>
+              <div class="form-row-3">
+                ${inputField("Permuta física", "costs.permFisicaPct", state.study.costs.permFisicaPct, { suffix: "%" })}
+                ${inputField("Permuta financeira", "costs.permFinPct", state.study.costs.permFinPct, { suffix: "%" })}
+                ${inputField("Terreno", "costs.terrenoM2", state.study.costs.terrenoM2, { prefix: "R$", suffix: "/m² área total" })}
+              </div>
+            </div>
+          </div>
+
+          <div class="section">
+            <div class="section-head head-orange">4. Estrutura de custos</div>
+            <div class="section-body">
+              <div class="form-row-3">
+                ${inputField("Infraestrutura", "costs.infraM2", state.study.costs.infraM2, { prefix: "R$", suffix: "/m² loteável" })}
+                ${inputField("Projeto e licenciamento", "costs.projetoR", state.study.costs.projetoR, { prefix: "R$" })}
+                ${inputField("Registro", "costs.registroR", state.study.costs.registroR, { prefix: "R$" })}
+              </div>
+              <div class="form-row-3">
+                ${inputField("Manutenção pós-obra", "costs.manutPosPct", state.study.costs.manutPosPct, { suffix: "% infra" })}
+                ${inputField("Marketing e vendas", "costs.marketingPct", state.study.costs.marketingPct, { suffix: "% VGV" })}
+                ${inputField("Corretagem", "costs.corretagemPct", state.study.costs.corretagemPct, { suffix: "% VGV" })}
+              </div>
+              <div class="form-row-3">
+                ${inputField("Administração e gestão", "costs.adminPct", state.study.costs.adminPct, { suffix: "% VGV" })}
+                ${inputField("Impostos sobre vendas", "costs.impostosPct", state.study.costs.impostosPct, { suffix: "% VGV" })}
+                ${inputField("House comercial (R$/mês)", "costs.houseMes", state.study.costs.houseMes, { prefix: "R$" })}
+              </div>
+              <div class="form-row-2">
+                ${inputField("Nº de corretores", "costs.houseCorretores", state.study.costs.houseCorretores)}
+                ${inputField("Meses", "costs.houseMeses", state.study.costs.houseMeses)}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Proforma à esquerda, KPIs + ações à direita -->
+        <div class="card-grid-2" style="margin-top:18px">
+          <div class="section">
+            <div class="section-head head-primary">Proforma financeiro</div>
             <div class="section-body">
               <div class="proforma-wrap">
                 <div class="proforma-title">PROFORMA LOTEAMENTO</div>
@@ -565,34 +547,37 @@ function loteamentoView() {
                 <table class="proforma-table">
                   <thead>
                     <tr>
-                      <th></th>
-                      <th>R$</th>
-                      <th>% VGV</th>
+                      <th style="width:52%;text-align:left"></th>
+                      <th style="width:32%">R$</th>
+                      <th style="width:16%;white-space:nowrap">% VGV</th>
                     </tr>
                   </thead>
                   <tbody>
                     ${proformaRow("Receita bruta (VGV)", c.vgvBruto, 100, "row-sec")}
-                    ${proformaRow("Corretagem", -c.corretagemR, pctOf(c.corretagemR, c.vgvBruto), "row-normal")}
-                    ${proformaRow("Marketing e vendas", -c.marketingR, pctOf(c.marketingR, c.vgvBruto), "row-normal")}
-                    ${proformaRow("Pagamento fixo - house", -c.houseR, pctOf(c.houseR, c.vgvBruto), "row-normal")}
-                    ${proformaRow("Permuta financeira", -c.permFinR, pctOf(c.permFinR, c.vgvBruto), "row-normal")}
+                    ${proformaRow("Corretagem", -c.corretagemR, pctOf(c.corretagemR, c.vgvBruto), "row-expense")}
+                    ${proformaRow("Marketing e vendas", -c.marketingR, pctOf(c.marketingR, c.vgvBruto), "row-expense")}
+                    ${proformaRow("Pagamento fixo - house", -c.houseR, pctOf(c.houseR, c.vgvBruto), "row-expense")}
+                    ${proformaRow("Permuta financeira", -c.permFinR, pctOf(c.permFinR, c.vgvBruto), "row-expense")}
                     ${proformaRow("Receita líquida", c.receitaLiquida, c.margemLiquidaPct, "row-sub")}
-                    ${proformaRow("Pagamento do terreno", -c.terrenoR, pctOf(c.terrenoR, c.vgvBruto), "row-normal")}
+                    ${proformaRow("Pagamento do terreno", -c.terrenoR, pctOf(c.terrenoR, c.vgvBruto), "row-expense")}
                     ${proformaRow("Custo obras total", -c.custoObrasTotal, c.custoObrasPct, "row-cost")}
-                    ${proformaRow("Infraestrutura", -c.infraR, pctOf(c.infraR, c.vgvBruto), "row-normal")}
-                    ${proformaRow("Projeto e licenciamento", -c.projetoR, pctOf(c.projetoR, c.vgvBruto), "row-normal")}
-                    ${proformaRow("Registro", -c.registroR, pctOf(c.registroR, c.vgvBruto), "row-normal")}
-                    ${proformaRow("Manutenção pós-obra", -c.manutPosR, pctOf(c.manutPosR, c.vgvBruto), "row-normal")}
+                    ${proformaRow("Infraestrutura", -c.infraR, pctOf(c.infraR, c.vgvBruto), "row-expense")}
+                    ${proformaRow("Projeto e licenciamento", -c.projetoR, pctOf(c.projetoR, c.vgvBruto), "row-expense")}
+                    ${proformaRow("Registro", -c.registroR, pctOf(c.registroR, c.vgvBruto), "row-expense")}
+                    ${proformaRow("Manutenção pós-obra", -c.manutPosR, pctOf(c.manutPosR, c.vgvBruto), "row-expense")}
                     ${proformaRow("Resultado operacional", c.resultadoOperacional, c.margemOperacionalPct, "row-sub")}
-                    ${proformaRow("Impostos sobre vendas", -c.impostosR, pctOf(c.impostosR, c.vgvBruto), "row-normal")}
-                    ${proformaRow("Administração e gestão", -c.adminR, pctOf(c.adminR, c.vgvBruto), "row-normal")}
+                    ${proformaRow("Impostos sobre vendas", -c.impostosR, pctOf(c.impostosR, c.vgvBruto), "row-expense")}
+                    ${proformaRow("Administração e gestão", -c.adminR, pctOf(c.adminR, c.vgvBruto), "row-expense")}
                     ${proformaRow("Resultado final", c.resultadoFinal, c.margemFinalPct, "row-result")}
                   </tbody>
                 </table>
               </div>
+            </div>
+          </div>
 
-              <div class="spacer"></div>
-
+          <div class="section">
+            <div class="section-head head-blue">Indicadores financeiros</div>
+            <div class="section-body">
               <div class="kpi-grid">
                 ${kpi("Receita líquida", rs(c.receitaLiquida), pc(c.margemLiquidaPct))}
                 ${kpi("Resultado operacional", rs(c.resultadoOperacional), pc(c.margemOperacionalPct))}
@@ -603,25 +588,7 @@ function loteamentoView() {
                 ${kpi("Preço médio por lote", rs(c.ticketMedio), `${fmt(c.nLotes, 0)} lotes`)}
                 ${kpi("Relação preço/custo m²", `${fmt(c.relPrecoCusto)}x`, `Preço: R$ ${fmt(c.precoM2)}/m²`)}
               </div>
-            </div>
-          </div>
-
-          <div class="section">
-            <div class="section-head head-green">Comparação de cenários</div>
-            <div class="section-body">
-              <div class="footer-actions no-print">
-                <div class="btn-row">
-                  <button class="btn gray" onclick="saveScenario()">Guardar cenário</button>
-                  <button class="btn danger" onclick="clearScenarios()">Limpar comparação</button>
-                </div>
-                <div class="muted">Salve um cenário, altere valores e salve de novo para comparar.</div>
-              </div>
-
               <div class="spacer"></div>
-              ${comparisonView()}
-
-              <div class="spacer"></div>
-
               <div class="footer-actions no-print">
                 <div class="btn-row">
                   <button class="btn primary" onclick="exportPDF()">Exportar PDF</button>
@@ -629,9 +596,26 @@ function loteamentoView() {
                   <button class="btn orange" onclick="sendStudyToSheet()">Registrar na Google Sheet</button>
                   <button class="btn blue" onclick="syncBenchmarksToSheet()">Salvar benchmarks</button>
                 </div>
-                <div class="muted">${state.sheetMessage || "Os 4 botões já funcionam nesta versão. O envio para Google depende da URL do Apps Script."}</div>
+                ${state.sheetMessage
+                  ? `<div class="${state.sheetMessage.startsWith("Erro") || state.sheetMessage.startsWith("Falha") ? "error" : "notice"}">${state.sheetMessage}</div>`
+                  : `<div class="muted">Exporte ou envie o estudo para o Google Sheets.</div>`}
               </div>
             </div>
+          </div>
+        </div>
+
+        <!-- Comparação de cenários ao final -->
+        <div class="section" style="margin-top:18px">
+          <div class="section-head head-green">Comparação de cenários</div>
+          <div class="section-body">
+            <div class="footer-actions no-print" style="margin-bottom:12px">
+              <div class="btn-row">
+                <button class="btn gray" onclick="saveScenario()">Guardar cenário</button>
+                <button class="btn danger" onclick="clearScenarios()">Limpar comparação</button>
+              </div>
+              <div class="muted">Salve um cenário, altere valores e salve de novo para comparar.</div>
+            </div>
+            ${comparisonView()}
           </div>
         </div>
       </div>
@@ -785,15 +769,10 @@ function benchmarkCard(type, title, data) {
   return `
     <div class="mini-card">
       <h4>${title}</h4>
-      ${benchmarkInput("Área loteável / total (%)", type, "urban", "areaLoteavelPct", data.urban.areaLoteavelPct)}
       ${benchmarkInput("Área lotes vendáveis (%)", type, "urban", "areaLotesPct", data.urban.areaLotesPct)}
-      ${benchmarkInput("Área líquida de venda (%)", type, "urban", "areaLiquidaVendaPct", data.urban.areaLiquidaVendaPct)}
-      ${benchmarkInput("Lotes possíveis", type, "urban", "lotesPossiveis", data.urban.lotesPossiveis)}
-
       ${benchmarkInput("Margem final / VGV (%)", type, "financial", "margemFinalPct", data.financial.margemFinalPct)}
       ${benchmarkInput("Margem operacional (%)", type, "financial", "margemOperacionalPct", data.financial.margemOperacionalPct)}
       ${benchmarkInput("Custo obras / VGV (%)", type, "financial", "custoObrasPct", data.financial.custoObrasPct)}
-      ${benchmarkInput("Preço de venda (R$/m²)", type, "financial", "precoVendaM2", data.financial.precoVendaM2)}
     </div>
   `;
 }
@@ -866,9 +845,13 @@ async function syncBenchmarksToSheet() {
   try {
     saveLocal(STORAGE_KEYS.benchmarks, state.benchmarks);
     const res = await postToAppsScript("saveBenchmarks", state.benchmarks);
-    state.benchmarkMessage = res.message || "Benchmarks enviados para a planilha com sucesso.";
+    const msg = res.message || "Benchmarks enviados para a planilha com sucesso.";
+    state.benchmarkMessage = msg;
+    state.sheetMessage = msg;
   } catch (err) {
-    state.benchmarkMessage = `Falha ao salvar benchmarks na planilha: ${err.message}`;
+    const msg = `Falha ao salvar benchmarks na planilha: ${err.message}`;
+    state.benchmarkMessage = msg;
+    state.sheetMessage = msg;
   }
   rerender();
 }
@@ -1049,8 +1032,25 @@ function attachEvents() {
 }
 
 function rerender() {
-  document.getElementById("root").innerHTML = render();
+  const root = document.getElementById("root");
+  const scrollY = window.scrollY;
+  const activeEl = document.activeElement;
+  const activePath = activeEl ? activeEl.getAttribute("data-path") : null;
+  const activeCursor = activePath ? activeEl.selectionEnd : null;
+
+  root.innerHTML = render();
   attachEvents();
+
+  window.scrollTo(0, scrollY);
+  if (activePath) {
+    const el = document.querySelector(`[data-path="${activePath}"]`);
+    if (el) {
+      el.focus();
+      if (activeCursor !== null) {
+        try { el.setSelectionRange(activeCursor, activeCursor); } catch {}
+      }
+    }
+  }
 }
 
 function bootApp() {
