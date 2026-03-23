@@ -55,7 +55,7 @@ input[type=number]{-moz-appearance:textfield}
   margin:0 auto;
   padding:24px;
 }
-.view{animation:fade .22s ease}
+.view{}
 @keyframes fade{
   from{opacity:0;transform:translateY(8px)}
   to{opacity:1;transform:translateY(0)}
@@ -376,38 +376,35 @@ input[type=number]{-moz-appearance:textfield}
 }
 .proforma-table th,
 .proforma-table td{
-  padding:10px 12px;
+  padding:9px 12px;
   font-size:13px;
 }
 .proforma-table th{
   background:var(--primary);
   color:#fff;
   text-align:right;
+  font-weight:800;
 }
 .proforma-table th:first-child{text-align:left}
-.proforma-table td:first-child{
-  font-weight:800;
-  color:#fff;
-}
+.proforma-table td:first-child{font-weight:700}
 .proforma-table td.num{
   text-align:right;
   font-family:'JetBrains Mono',monospace;
-  background:#fff;
-  color:var(--text);
 }
-.row-sec td:first-child,
-.row-sub td:first-child{
-  background:var(--primary);
-}
-.row-normal td:first-child{
-  background:var(--teal);
-}
-.row-cost td:first-child{
-  background:var(--orange);
-}
-.row-result td:first-child{
-  background:var(--green);
-}
+/* Revenue header (VGV) */
+.row-sec td{background:var(--primary);color:#fff;font-weight:800}
+/* Subtotals */
+.row-sub td{background:#ddf0f5;color:var(--primary);font-weight:700}
+.row-sub td:first-child{border-left:3px solid var(--teal)}
+/* Expense / deduction detail rows */
+.row-expense td{background:#fdf8f4;color:var(--text)}
+.row-expense td:first-child{color:#8a4e18;padding-left:22px}
+.row-expense td.num{color:#8a4e18}
+/* Cost subtotal row */
+.row-cost td{background:#faeee1;color:var(--orange);font-weight:700;border-top:1px solid #e8c49a}
+.row-cost td:first-child{border-left:3px solid var(--orange)}
+/* Final result */
+.row-result td{background:var(--green);color:#fff;font-weight:800;border-top:2px solid #1f6b34}
 
 .compare-grid{
   display:grid;
@@ -447,6 +444,14 @@ input[type=number]{-moz-appearance:textfield}
   font-size:13px;
 }
 .spacer{height:16px}
+.home-section-label{
+  font-size:11px;
+  font-weight:800;
+  text-transform:uppercase;
+  letter-spacing:1.5px;
+  color:var(--muted);
+  margin:0 0 12px;
+}
 
 .modal-overlay{
   position:fixed;
