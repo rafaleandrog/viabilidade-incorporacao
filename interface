@@ -1,0 +1,1001 @@
+from __future__ import annotations
+
+import copy
+import datetime as dt
+import io
+import json
+import math
+import os
+import uuid
+from dataclasses import dataclass, asdict
+from typing import Any, Dict, List, Optional, Tuple
+
+import pandas as pd
+import streamlit as st
+
+
+# ============================================================
+# Configuração
+# ============================================================
+
+APP_TITLE = "Viabilidade Imobiliária — Estudo Preliminar"
+SPREADSHEET_ID = "17zSQ-CdCx9llm1pltkOC8XFXW3hWY751vw6xkl1MYjA"
+WORKSHEET_NAME = "viabilidade"
+
+# Cabeçalhos “esperados” na aba viabilidade.
+# Se a sua sheet já tiver um layout diferente, ajuste esta lista para coincidir 1:1.
+SHEET_HEADERS: List[str] = [
+    "study_id",
+    "timestamp_iso",
+    "fase",
+    "tipo_projeto",
+    "nome_projeto",
+    "area_total_ofertada_m2",
+    "area_app_m2",
+    "area_remanescente_m2",
+    "area_nao_edificante_m2",
+    "area_loteavel_m2",
+    "pct_institucional",
+    "pct_publica",
+    "pct_viario",
+    "pct_lotes_vendavel",
+    "area_lotes_vendavel_m2",
+    "n_lotes",
+    "area_lote_medio_m2",
+    "area_total_lotes_m2",
+    "permuta_fisica_pct_area",
+    "area_liquida_venda_m2",
+    "preco_venda_r_m2",
+    "ticket_medio_r",
+    "vgv_potencial_r",
+    "vgv_r",
+    "perda_permuta_fisica_r",
+    "permuta_financeira_pct_vgv",
+    "corretagem_pct_vgv",
+    "marketing_vendas_pct_vgv",
+    "house_r_mes",
+    "house_n_corretores",
+    "house_meses",
+    "house_total_r",
+    "terreno_r_m2",
+    "terreno_total_r",
+    "custo_infra_r_m2_area_loteavel",
+    "custo_infra_total_r",
+    "custo_projeto_lic_r",
+    "custo_registro_r",
+    "manut_pos_obra_pct_sobre_obra",
+    "manut_pos_obra_r",
+    "custo_obras_total_r",
+    "receita_liquida_r",
+    "resultado_operacional_r",
+    "impostos_pct_vgv",
+    "impostos_r",
+    "adm_gestao_pct_vgv",
+    "adm_gestao_r",
+    "resultado_final_r",
+    "margem_operacional_pct_vgv",
+    "margem_final_pct_vgv",
+]
+
+PHASES = ["Estudo Preliminar", "Pré-Projeto"]
+PROJECT_TYPES = ["Loteamento", "Incorporação Horizontal", "Incorporação Vertical"]
+
+
+# ============================================================
+# Helpers de formatação
+# ============================================================
+
+def _safe_float(x: Any) -> float:
+    try:
+        if x is None:
+            return 0.0
+        return float(x)
+    except Exception:
+        return 0.0
+
+
+def _clamp_pct(x: Any) -> float:
+    v = _safe_float(x)
+    return max(0.0, min(100.0, v))
+
+
+def fmt_num_ptbr(n: float, decimals: int = 0) -> str:
+    """Formata número com milhares '.' e decimal ',' (estilo PT/BR)."""
+    if n is None or (isinstance(n, float) and math.isnan(n)):
+        return "-"
+    s = f"{abs(n):,.{decimals}f}"  # 1,234,567.89
+    s = s.replace(",", "X").replace(".", ",").replace("X", ".")  # 1.234.567,89
+    if decimals == 0:
+        s = s.split(",")[0]
+    if n < 0:
+        return f"({s})"
+    return s
+
+
+def fmt_money_plain(n: float) -> str:
+    return fmt_num_ptbr(n, decimals=0)
+
+
+def fmt_currency(n: float) -> str:
+    return f"R$ {fmt_money_plain(n)}"
+
+
+def fmt_pct(p: float, decimals: int = 2) -> str:
+    if p is None or (isinstance(p, float) and math.isnan(p)):
+        return "-"
+    s = f"{p:.{decimals}f}".replace(".", ",")
+    return f"{s}%"
+
+
+def pct_of_vgv(value: float, vgv: float, signed: bool = False) -> float:
+    if vgv <= 0:
+        return 0.0
+    return (value / vgv * 100.0) if signed else (abs(value) / vgv * 100.0)
+
+
+# ============================================================
+# Modelo de inputs e cálculo (Loteamento)
+# ============================================================
+
+@dataclass
+class LoteamentoInputs:
+    nome_projeto: str = "Calliandra"
+
+    # Área (m²)
+    area_total_ofertada_m2: float = 426_029.97
+    area_app_m2: float = 0.0
+    area_remanescente_m2: float = 48_013.58
+    area_nao_edificante_m2: float = 0.0
+
+    # Distribuição da área loteável (%)
+    pct_institucional: float = 5.0
+    pct_publica: float = 15.0
+    pct_viario: float = 30.0
+
+    # Produto
+    n_lotes: int = 500
+    area_lote_medio_m2: float = 378.0
+
+    # Preço
+    preco_venda_r_m2: float = 750.0
+
+    # Permutas
+    permuta_fisica_pct_area: float = 0.0        # % sobre área líquida de vendas (área em lotes)
+    permuta_financeira_pct_vgv: float = 0.0     # % sobre VGV
+
+    # Custos por VGV
+    corretagem_pct_vgv: float = 5.50
+    marketing_vendas_pct_vgv: float = 2.11
+    impostos_pct_vgv: float = 4.00
+    adm_gestao_pct_vgv: float = 1.00
+
+    # Opcional: “pagamento fixo – house”
+    house_r_mes: float = 0.0
+    house_n_corretores: int = 6
+    house_meses: int = 6
+
+    # Terreno
+    terreno_r_m2: float = 0.0  # aplicado sobre área total ofertada
+
+    # Custos de obra
+    custo_infra_r_m2_area_loteavel: float = 0.0   # R$/m² por área loteável
+    custo_projeto_lic_r: float = 0.0              # R$
+    custo_registro_r: float = 0.0                 # R$
+    manut_pos_obra_pct_sobre_obra: float = 0.0    # % sobre custo de infra (por simplicidade)
+
+
+def compute_loteamento(ins: LoteamentoInputs) -> Dict[str, float]:
+    # --- Área base
+    area_total = max(0.0, ins.area_total_ofertada_m2)
+    area_loteavel = max(0.0, area_total - ins.area_app_m2 - ins.area_remanescente_m2 - ins.area_nao_edificante_m2)
+
+    # --- Distribuição
+    pct_inst = _clamp_pct(ins.pct_institucional)
+    pct_pub = _clamp_pct(ins.pct_publica)
+    pct_viario = _clamp_pct(ins.pct_viario)
+    soma_pct = pct_inst + pct_pub + pct_viario
+    pct_vendavel = max(0.0, 100.0 - soma_pct)  # residual
+
+    area_inst = area_loteavel * pct_inst / 100.0
+    area_pub = area_loteavel * pct_pub / 100.0
+    area_viario = area_loteavel * pct_viario / 100.0
+    area_lotes_vendavel = max(0.0, area_loteavel - area_inst - area_pub - area_viario)
+
+    # --- Produto (área em lotes)
+    n_lotes = max(0, int(ins.n_lotes))
+    area_lote_medio = max(0.0, ins.area_lote_medio_m2)
+    area_total_lotes = n_lotes * area_lote_medio
+
+    # --- Permuta física (% sobre área em lotes)
+    permuta_fis_pct = _clamp_pct(ins.permuta_fisica_pct_area)
+    area_permuta_fis = area_total_lotes * permuta_fis_pct / 100.0
+    area_liquida_venda = max(0.0, area_total_lotes - area_permuta_fis)
+
+    # --- Preço e receitas
+    preco_m2 = max(0.0, ins.preco_venda_r_m2)
+    ticket_medio = area_lote_medio * preco_m2
+
+    vgv_potencial = area_total_lotes * preco_m2
+    vgv = area_liquida_venda * preco_m2
+    perda_permuta_fis = max(0.0, vgv_potencial - vgv)
+
+    # --- Deduções comerciais e permuta financeira
+    permuta_fin_pct = _clamp_pct(ins.permuta_financeira_pct_vgv)
+    permuta_fin = vgv * permuta_fin_pct / 100.0
+
+    corretagem = vgv * _clamp_pct(ins.corretagem_pct_vgv) / 100.0
+    marketing = vgv * _clamp_pct(ins.marketing_vendas_pct_vgv) / 100.0
+
+    house_total = max(0.0, ins.house_r_mes) * max(0, int(ins.house_n_corretores)) * max(0, int(ins.house_meses))
+
+    receita_liquida = vgv - corretagem - marketing - house_total - permuta_fin
+
+    # --- Terreno
+    terreno_total = max(0.0, ins.terreno_r_m2) * area_total
+
+    # --- Obras
+    infra_total = max(0.0, ins.custo_infra_r_m2_area_loteavel) * area_loteavel
+    manut_pos = infra_total * _clamp_pct(ins.manut_pos_obra_pct_sobre_obra) / 100.0
+    custo_obras_total = infra_total + max(0.0, ins.custo_projeto_lic_r) + max(0.0, ins.custo_registro_r) + manut_pos
+
+    resultado_operacional = receita_liquida - terreno_total - custo_obras_total
+
+    # --- Indirectos (por VGV)
+    impostos = vgv * _clamp_pct(ins.impostos_pct_vgv) / 100.0
+    adm_gestao = vgv * _clamp_pct(ins.adm_gestao_pct_vgv) / 100.0
+
+    resultado_final = resultado_operacional - impostos - adm_gestao
+
+    return {
+        # áreas
+        "area_total_ofertada_m2": area_total,
+        "area_loteavel_m2": area_loteavel,
+        "pct_institucional": pct_inst,
+        "pct_publica": pct_pub,
+        "pct_viario": pct_viario,
+        "pct_lotes_vendavel": pct_vendavel,
+        "area_institucional_m2": area_inst,
+        "area_publica_m2": area_pub,
+        "area_viario_m2": area_viario,
+        "area_lotes_vendavel_m2": area_lotes_vendavel,
+        # produto
+        "n_lotes": float(n_lotes),
+        "area_lote_medio_m2": area_lote_medio,
+        "area_total_lotes_m2": area_total_lotes,
+        # permutas
+        "permuta_fisica_pct_area": permuta_fis_pct,
+        "area_liquida_venda_m2": area_liquida_venda,
+        # preço/receitas
+        "preco_venda_r_m2": preco_m2,
+        "ticket_medio_r": ticket_medio,
+        "vgv_potencial_r": vgv_potencial,
+        "vgv_r": vgv,
+        "perda_permuta_fisica_r": perda_permuta_fis,
+        # deduções
+        "permuta_financeira_pct_vgv": permuta_fin_pct,
+        "permuta_financeira_r": permuta_fin,
+        "corretagem_pct_vgv": _clamp_pct(ins.corretagem_pct_vgv),
+        "corretagem_r": corretagem,
+        "marketing_vendas_pct_vgv": _clamp_pct(ins.marketing_vendas_pct_vgv),
+        "marketing_vendas_r": marketing,
+        "house_r_mes": max(0.0, ins.house_r_mes),
+        "house_n_corretores": float(max(0, int(ins.house_n_corretores))),
+        "house_meses": float(max(0, int(ins.house_meses))),
+        "house_total_r": house_total,
+        # custos
+        "terreno_r_m2": max(0.0, ins.terreno_r_m2),
+        "terreno_total_r": terreno_total,
+        "custo_infra_r_m2_area_loteavel": max(0.0, ins.custo_infra_r_m2_area_loteavel),
+        "custo_infra_total_r": infra_total,
+        "custo_projeto_lic_r": max(0.0, ins.custo_projeto_lic_r),
+        "custo_registro_r": max(0.0, ins.custo_registro_r),
+        "manut_pos_obra_pct_sobre_obra": _clamp_pct(ins.manut_pos_obra_pct_sobre_obra),
+        "manut_pos_obra_r": manut_pos,
+        "custo_obras_total_r": custo_obras_total,
+        # resultados
+        "receita_liquida_r": receita_liquida,
+        "resultado_operacional_r": resultado_operacional,
+        "impostos_pct_vgv": _clamp_pct(ins.impostos_pct_vgv),
+        "impostos_r": impostos,
+        "adm_gestao_pct_vgv": _clamp_pct(ins.adm_gestao_pct_vgv),
+        "adm_gestao_r": adm_gestao,
+        "resultado_final_r": resultado_final,
+        # margens
+        "margem_operacional_pct_vgv": pct_of_vgv(resultado_operacional, vgv, signed=True),
+        "margem_final_pct_vgv": pct_of_vgv(resultado_final, vgv, signed=True),
+        # validação útil
+        "soma_pct_distribuicao": soma_pct,
+    }
+
+
+# ============================================================
+# Proforma (linhas + HTML)
+# ============================================================
+
+def build_proforma_lines(res: Dict[str, float]) -> List[Dict[str, Any]]:
+    vgv = res["vgv_r"]
+
+    # valores (custos positivos “em módulo”, mas vamos exibir como negativos na coluna R$)
+    corret = res["corretagem_r"]
+    mkt = res["marketing_vendas_r"]
+    house = res["house_total_r"]
+    perm_fin = res["permuta_financeira_r"]
+
+    terreno = res["terreno_total_r"]
+    obras = res["custo_obras_total_r"]
+    infra = res["custo_infra_total_r"]
+    proj = res["custo_projeto_lic_r"]
+    reg = res["custo_registro_r"]
+    manut = res["manut_pos_obra_r"]
+
+    rec_liq = res["receita_liquida_r"]
+    res_op = res["resultado_operacional_r"]
+    impostos = res["impostos_r"]
+    adm = res["adm_gestao_r"]
+    res_final = res["resultado_final_r"]
+
+    def line(label: str, value: float, pct: float, kind: str = "normal", show_pct: bool = True):
+        return {
+            "label": label,
+            "value": value,
+            "pct": pct,
+            "kind": kind,
+            "show_pct": show_pct,
+        }
+
+    lines: List[Dict[str, Any]] = []
+    lines.append(line("Receita bruta (VGV)", vgv, 100.0, kind="section"))
+
+    lines.append(line("Corretagem", -corret, pct_of_vgv(corret, vgv, signed=False)))
+    lines.append(line("Marketing e vendas", -mkt, pct_of_vgv(mkt, vgv, signed=False)))
+    lines.append(line("Pagamento fixo - house", -house, pct_of_vgv(house, vgv, signed=False)))
+    lines.append(line("Permuta financeira", -perm_fin, pct_of_vgv(perm_fin, vgv, signed=False)))
+
+    lines.append(line("Receita líquida", rec_liq, pct_of_vgv(rec_liq, vgv, signed=True), kind="subtotal"))
+
+    lines.append(line("Pagamento do terreno", -terreno, pct_of_vgv(terreno, vgv, signed=False), kind="costblock"))
+
+    lines.append(line("Custo Obras Total", -obras, pct_of_vgv(obras, vgv, signed=False), kind="costblock-strong"))
+    lines.append(line("  Infraestrutura", -infra, pct_of_vgv(infra, vgv, signed=False)))
+    lines.append(line("  Projecto e licenciamento", -proj, pct_of_vgv(proj, vgv, signed=False)))
+    lines.append(line("  Registo", -reg, pct_of_vgv(reg, vgv, signed=False)))
+    lines.append(line("  Manutenção pós-obra", -manut, pct_of_vgv(manut, vgv, signed=False)))
+
+    lines.append(line("Resultado operacional", res_op, pct_of_vgv(res_op, vgv, signed=True), kind="subtotal"))
+
+    lines.append(line("Impostos sobre vendas", -impostos, pct_of_vgv(impostos, vgv, signed=False)))
+    lines.append(line("Administração e gestão", -adm, pct_of_vgv(adm, vgv, signed=False)))
+
+    lines.append(line("Resultado final", res_final, pct_of_vgv(res_final, vgv, signed=True), kind="result"))
+    return lines
+
+
+def render_proforma_html(nome_projeto: str, lines: List[Dict[str, Any]]) -> str:
+    css = """
+    <style>
+      .pf-wrap{font-family: ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial;
+               border-radius:12px; overflow:hidden; border:1px solid rgba(0,0,0,0.08)}
+      .pf-title{background:#0b4f55; color:white; padding:10px 14px; font-weight:800; letter-spacing:.5px; text-align:center}
+      .pf-name{background:#106a72; color:white; padding:8px 14px; font-weight:700}
+      table.pf{width:100%; border-collapse:collapse}
+      table.pf td{padding:6px 10px; font-size:14px}
+      td.lbl{color:white; font-weight:600}
+      td.val, td.pct{background:rgba(255,255,255,0.92); text-align:right; font-variant-numeric: tabular-nums}
+      tr.section td{background:#0b4f55}
+      tr.subtotal td{background:#0b4f55}
+      tr.coststrong td{background:#a85a00}
+      tr.costblock td{background:#137b84}
+      tr.normal td{background:#18a2ad}
+      tr.result td{background:#2f6f2f}
+      .hdr{background:#0b4f55; color:white; font-weight:800}
+      .hdr td{font-size:13px}
+      .muted{opacity:0.9; font-weight:500}
+    </style>
+    """
+
+    header = """
+    <div class="pf-wrap">
+      <div class="pf-title">PROFORMA LOTEAMENTO</div>
+      <div class="pf-name">%s</div>
+      <table class="pf">
+        <tr class="hdr">
+          <td class="lbl"></td>
+          <td class="val">R$</td>
+          <td class="pct">%% VGV</td>
+        </tr>
+    """ % (nome_projeto.replace("<", "&lt;").replace(">", "&gt;"))
+
+    rows = []
+    for r in lines:
+        kind = r["kind"]
+        tr_class = "normal"
+        if kind == "section":
+            tr_class = "section"
+        elif kind == "subtotal":
+            tr_class = "subtotal"
+        elif kind == "result":
+            tr_class = "result"
+        elif kind == "costblock-strong":
+            tr_class = "coststrong"
+        elif kind == "costblock":
+            tr_class = "costblock"
+
+        label = r["label"]
+        value = float(r["value"])
+        pct = float(r["pct"])
+        rows.append(
+            f"""
+            <tr class="{tr_class}">
+              <td class="lbl">{label}</td>
+              <td class="val">{fmt_money_plain(value)}</td>
+              <td class="pct">{fmt_pct(pct,2)}</td>
+            </tr>
+            """
+        )
+
+    footer = """
+      </table>
+    </div>
+    """
+    return css + header + "\n".join(rows) + footer
+
+
+# ============================================================
+# Exportação PDF (ReportLab) e Excel (openpyxl)
+# ============================================================
+
+def generate_pdf_bytes(fase: str, tipo: str, ins: LoteamentoInputs, res: Dict[str, float]) -> bytes:
+    # Importes locais para não quebrar o app se a pessoa ainda não instalou dependências
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=28, rightMargin=28, topMargin=24, bottomMargin=24)
+    styles = getSampleStyleSheet()
+
+    story = []
+    story.append(Paragraph(f"<b>{APP_TITLE}</b>", styles["Title"]))
+    story.append(Paragraph(f"<b>Fase:</b> {fase} &nbsp;&nbsp; <b>Tipo:</b> {tipo}", styles["Normal"]))
+    story.append(Paragraph(f"<b>Projecto:</b> {ins.nome_projeto}", styles["Normal"]))
+    story.append(Paragraph(f"<b>Gerado em:</b> {dt.datetime.now().isoformat(timespec='seconds')}", styles["Normal"]))
+    story.append(Spacer(1, 10))
+
+    # Tabela 1: Área
+    area_rows = [
+        ["Descrição", "% da Área", "Área (m²)"],
+        ["Área Total Ofertada", "100,00%", fmt_num_ptbr(res["area_total_ofertada_m2"], 2)],
+        ["APP", fmt_pct(100 * (ins.area_app_m2 / res["area_total_ofertada_m2"]) if res["area_total_ofertada_m2"] else 0, 2), fmt_num_ptbr(ins.area_app_m2, 2)],
+        ["Área Remanescente", fmt_pct(100 * (ins.area_remanescente_m2 / res["area_total_ofertada_m2"]) if res["area_total_ofertada_m2"] else 0, 2), fmt_num_ptbr(ins.area_remanescente_m2, 2)],
+        ["Área Não-Edificante", fmt_pct(100 * (ins.area_nao_edificante_m2 / res["area_total_ofertada_m2"]) if res["area_total_ofertada_m2"] else 0, 2), fmt_num_ptbr(ins.area_nao_edificante_m2, 2)],
+        ["Área Loteável", fmt_pct(100 * (res["area_loteavel_m2"] / res["area_total_ofertada_m2"]) if res["area_total_ofertada_m2"] else 0, 2), fmt_num_ptbr(res["area_loteavel_m2"], 2)],
+    ]
+    story.append(Paragraph("<b>Dados da área</b>", styles["Heading2"]))
+    t = Table(area_rows, colWidths=[220, 90, 110])
+    t.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0b4f55")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("GRID", (0, 0), (-1, -1), 0.3, colors.grey),
+        ("ALIGN", (1, 1), (-1, -1), "RIGHT"),
+    ]))
+    story.append(t)
+    story.append(Spacer(1, 10))
+
+    # Tabela 2: Distribuição
+    dist_rows = [
+        ["Componente", "% da Loteável", "Área (m²)"],
+        ["Áreas Institucionais", fmt_pct(res["pct_institucional"], 2), fmt_num_ptbr(res["area_institucional_m2"], 2)],
+        ["Áreas Públicas", fmt_pct(res["pct_publica"], 2), fmt_num_ptbr(res["area_publica_m2"], 2)],
+        ["Sistema Viário", fmt_pct(res["pct_viario"], 2), fmt_num_ptbr(res["area_viario_m2"], 2)],
+        ["Área dos Lotes (vendável)", fmt_pct(res["pct_lotes_vendavel"], 2), fmt_num_ptbr(res["area_lotes_vendavel_m2"], 2)],
+        ["TOTAL (verificação)", "100,00%", fmt_num_ptbr(res["area_loteavel_m2"], 2)],
+    ]
+    story.append(Paragraph("<b>Distribuição da área loteável</b>", styles["Heading2"]))
+    t2 = Table(dist_rows, colWidths=[220, 90, 110])
+    t2.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0b4f55")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("GRID", (0, 0), (-1, -1), 0.3, colors.grey),
+        ("ALIGN", (1, 1), (-1, -1), "RIGHT"),
+    ]))
+    story.append(t2)
+    story.append(Spacer(1, 10))
+
+    # Proforma (tabela)
+    story.append(Paragraph("<b>Proforma</b>", styles["Heading2"]))
+    proforma = build_proforma_lines(res)
+    pf_rows = [["Linha", "R$", "% VGV"]]
+    for r in proforma:
+        pf_rows.append([r["label"], fmt_money_plain(r["value"]), fmt_pct(r["pct"], 2)])
+    t3 = Table(pf_rows, colWidths=[260, 80, 80])
+    t3.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0b4f55")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("GRID", (0, 0), (-1, -1), 0.3, colors.grey),
+        ("ALIGN", (1, 1), (-1, -1), "RIGHT"),
+    ]))
+    story.append(t3)
+
+    doc.build(story)
+    return buf.getvalue()
+
+
+def generate_excel_bytes(fase: str, tipo: str, ins: LoteamentoInputs, res: Dict[str, float]) -> bytes:
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.worksheet.table import Table, TableStyleInfo
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Resumo"
+
+    header_fill = PatternFill("solid", fgColor="0B4F55")
+    header_font = Font(color="FFFFFF", bold=True)
+
+    ws["A1"] = APP_TITLE
+    ws["A1"].font = Font(bold=True, size=14)
+    ws["A2"] = "Fase"
+    ws["B2"] = fase
+    ws["A3"] = "Tipo"
+    ws["B3"] = tipo
+    ws["A4"] = "Projecto"
+    ws["B4"] = ins.nome_projeto
+    ws["A5"] = "Gerado em"
+    ws["B5"] = dt.datetime.now().isoformat(timespec="seconds")
+
+    # Proforma table
+    start_row = 7
+    ws[f"A{start_row}"] = "Linha"
+    ws[f"B{start_row}"] = "R$"
+    ws[f"C{start_row}"] = "% VGV"
+    for c in ["A", "B", "C"]:
+        cell = ws[f"{c}{start_row}"]
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center")
+
+    proforma = build_proforma_lines(res)
+    for i, r in enumerate(proforma, start=1):
+        rr = start_row + i
+        ws[f"A{rr}"] = r["label"]
+        ws[f"B{rr}"] = float(r["value"])
+        ws[f"C{rr}"] = float(r["pct"]) / 100.0
+        ws[f"B{rr}"].number_format = '"R$" #,##0'
+        ws[f"C{rr}"].number_format = '0.00%'
+
+    end_row = start_row + len(proforma)
+    tab = Table(displayName="Proforma", ref=f"A{start_row}:C{end_row}")
+    tab.tableStyleInfo = TableStyleInfo(
+        name="TableStyleMedium9",
+        showFirstColumn=False,
+        showLastColumn=False,
+        showRowStripes=True,
+        showColumnStripes=False,
+    )
+    ws.add_table(tab)
+
+    ws.column_dimensions["A"].width = 42
+    ws.column_dimensions["B"].width = 16
+    ws.column_dimensions["C"].width = 12
+
+    # Segunda sheet: Premissas
+    ws2 = wb.create_sheet("Premissas")
+    ws2.append(["Campo", "Valor"])
+    ws2["A1"].fill = header_fill
+    ws2["B1"].fill = header_fill
+    ws2["A1"].font = header_font
+    ws2["B1"].font = header_font
+
+    prem = asdict(ins)
+    for k, v in prem.items():
+        ws2.append([k, v])
+
+    ws2.column_dimensions["A"].width = 34
+    ws2.column_dimensions["B"].width = 22
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+# ============================================================
+# Google Sheets: escrita via Service Account (gspread)
+# ============================================================
+
+def _load_service_account_info() -> Dict[str, Any]:
+    """
+    Carrega credenciais a partir de:
+    - env var GOOGLE_SERVICE_ACCOUNT_JSON (string JSON)
+    - ou env var GOOGLE_SERVICE_ACCOUNT_FILE (path para json)
+    """
+    json_str = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
+    if json_str:
+        return json.loads(json_str)
+
+    json_file = os.getenv("GOOGLE_SERVICE_ACCOUNT_FILE", "").strip()
+    if json_file:
+        with open(json_file, "r", encoding="utf-8") as f:
+            return json.load(f)
+
+    raise RuntimeError(
+        "Credenciais não encontradas. Defina GOOGLE_SERVICE_ACCOUNT_JSON (conteúdo) "
+        "ou GOOGLE_SERVICE_ACCOUNT_FILE (caminho)."
+    )
+
+
+@st.cache_resource
+def _get_gspread_client():
+    import gspread
+    from google.oauth2.service_account import Credentials
+
+    info = _load_service_account_info()
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive",
+    ]
+    creds = Credentials.from_service_account_info(info, scopes=scopes)
+    return gspread.authorize(creds)
+
+
+def ensure_sheet_template(ws) -> None:
+    """
+    Garante que a worksheet tem:
+    - header row compatível com SHEET_HEADERS
+    - congelamento da primeira linha
+    - formatação básica do header
+    """
+    from gspread_formatting import (
+        CellFormat,
+        Color,
+        TextFormat,
+        format_cell_range,
+        set_frozen,
+    )
+    from gspread.utils import rowcol_to_a1
+
+    # Header
+    existing = ws.row_values(1)
+    if existing[: len(SHEET_HEADERS)] != SHEET_HEADERS:
+        ws.update("A1", [SHEET_HEADERS])
+
+    # Freeze primeira linha
+    set_frozen(ws, rows=1)
+
+    # Formatar header (A1:...1)
+    last = rowcol_to_a1(1, len(SHEET_HEADERS))
+    header_range = f"A1:{last}"
+    header_fmt = CellFormat(
+        backgroundColor=Color(0.043, 0.31, 0.333),  # aproximado #0b4f55
+        textFormat=TextFormat(bold=True, foregroundColor=Color(1, 1, 1)),
+    )
+    format_cell_range(ws, header_range, header_fmt)
+
+
+def append_study_to_google_sheet(row: Dict[str, Any]) -> None:
+    gc = _get_gspread_client()
+    sh = gc.open_by_key(SPREADSHEET_ID)
+    ws = sh.worksheet(WORKSHEET_NAME)
+
+    ensure_sheet_template(ws)
+
+    ordered = [row.get(h, "") for h in SHEET_HEADERS]
+    ws.append_row(ordered, value_input_option="USER_ENTERED")
+
+
+def make_sheet_row(fase: str, tipo: str, ins: LoteamentoInputs, res: Dict[str, float]) -> Dict[str, Any]:
+    study_id = uuid.uuid4().hex[:10]
+    ts = dt.datetime.now().isoformat(timespec="seconds")
+
+    row: Dict[str, Any] = {
+        "study_id": study_id,
+        "timestamp_iso": ts,
+        "fase": fase,
+        "tipo_projeto": tipo,
+        "nome_projeto": ins.nome_projeto,
+    }
+
+    # inputs e resultados relevantes
+    row.update({
+        "area_total_ofertada_m2": res["area_total_ofertada_m2"],
+        "area_app_m2": ins.area_app_m2,
+        "area_remanescente_m2": ins.area_remanescente_m2,
+        "area_nao_edificante_m2": ins.area_nao_edificante_m2,
+        "area_loteavel_m2": res["area_loteavel_m2"],
+
+        "pct_institucional": res["pct_institucional"],
+        "pct_publica": res["pct_publica"],
+        "pct_viario": res["pct_viario"],
+        "pct_lotes_vendavel": res["pct_lotes_vendavel"],
+        "area_lotes_vendavel_m2": res["area_lotes_vendavel_m2"],
+
+        "n_lotes": int(ins.n_lotes),
+        "area_lote_medio_m2": ins.area_lote_medio_m2,
+        "area_total_lotes_m2": res["area_total_lotes_m2"],
+
+        "permuta_fisica_pct_area": ins.permuta_fisica_pct_area,
+        "area_liquida_venda_m2": res["area_liquida_venda_m2"],
+
+        "preco_venda_r_m2": ins.preco_venda_r_m2,
+        "ticket_medio_r": res["ticket_medio_r"],
+        "vgv_potencial_r": res["vgv_potencial_r"],
+        "vgv_r": res["vgv_r"],
+        "perda_permuta_fisica_r": res["perda_permuta_fisica_r"],
+
+        "permuta_financeira_pct_vgv": ins.permuta_financeira_pct_vgv,
+
+        "corretagem_pct_vgv": ins.corretagem_pct_vgv,
+        "marketing_vendas_pct_vgv": ins.marketing_vendas_pct_vgv,
+
+        "house_r_mes": ins.house_r_mes,
+        "house_n_corretores": ins.house_n_corretores,
+        "house_meses": ins.house_meses,
+        "house_total_r": res["house_total_r"],
+
+        "terreno_r_m2": ins.terreno_r_m2,
+        "terreno_total_r": res["terreno_total_r"],
+
+        "custo_infra_r_m2_area_loteavel": ins.custo_infra_r_m2_area_loteavel,
+        "custo_infra_total_r": res["custo_infra_total_r"],
+        "custo_projeto_lic_r": ins.custo_projeto_lic_r,
+        "custo_registro_r": ins.custo_registro_r,
+        "manut_pos_obra_pct_sobre_obra": ins.manut_pos_obra_pct_sobre_obra,
+        "manut_pos_obra_r": res["manut_pos_obra_r"],
+        "custo_obras_total_r": res["custo_obras_total_r"],
+
+        "receita_liquida_r": res["receita_liquida_r"],
+        "resultado_operacional_r": res["resultado_operacional_r"],
+
+        "impostos_pct_vgv": ins.impostos_pct_vgv,
+        "impostos_r": res["impostos_r"],
+
+        "adm_gestao_pct_vgv": ins.adm_gestao_pct_vgv,
+        "adm_gestao_r": res["adm_gestao_r"],
+
+        "resultado_final_r": res["resultado_final_r"],
+        "margem_operacional_pct_vgv": res["margem_operacional_pct_vgv"],
+        "margem_final_pct_vgv": res["margem_final_pct_vgv"],
+    })
+
+    return row
+
+
+# ============================================================
+# Comparação de cenários (últimos 2 guardados)
+# ============================================================
+
+def _init_state():
+    if "saved_studies" not in st.session_state:
+        st.session_state.saved_studies = []  # list[dict]
+
+
+def save_current_study(fase: str, tipo: str, ins: LoteamentoInputs, res: Dict[str, float]) -> None:
+    st.session_state.saved_studies.append({
+        "saved_at": dt.datetime.now().isoformat(timespec="seconds"),
+        "fase": fase,
+        "tipo": tipo,
+        "ins": copy.deepcopy(asdict(ins)),
+        "res": copy.deepcopy(res),
+    })
+
+
+def proforma_df(res: Dict[str, float]) -> pd.DataFrame:
+    lines = build_proforma_lines(res)
+    return pd.DataFrame({
+        "Linha": [x["label"] for x in lines],
+        "R$": [x["value"] for x in lines],
+        "% VGV": [x["pct"] for x in lines],
+    })
+
+
+def compare_two(a: Dict[str, float], b: Dict[str, float]) -> pd.DataFrame:
+    dfa = proforma_df(a).set_index("Linha")
+    dfb = proforma_df(b).set_index("Linha")
+    out = dfa.join(dfb, lsuffix=" (A)", rsuffix=" (B)")
+    out["Δ R$"] = out["R$ (B)"] - out["R$ (A)"]
+    out["Δ %"] = out.apply(lambda r: (r["R$ (B)"] / r["R$ (A)"] - 1.0) * 100.0 if r["R$ (A)"] else 0.0, axis=1)
+    return out.reset_index()
+
+
+# ============================================================
+# UI (Streamlit)
+# ============================================================
+
+st.set_page_config(page_title=APP_TITLE, layout="wide")
+_init_state()
+
+st.title(APP_TITLE)
+
+with st.sidebar:
+    st.header("Selecção")
+    fase = st.selectbox("Fase", PHASES, index=0)
+    tipo = st.selectbox("Tipo de projecto", PROJECT_TYPES, index=0)
+
+    st.caption("Nota: por agora, apenas Estudo Preliminar → Loteamento tem cálculos.")
+
+
+if fase != "Estudo Preliminar":
+    st.info("Pré‑Projeto está preparado para evolução, mas ainda não tem ecrãs/cálculos implementados neste protótipo.")
+    st.stop()
+
+if tipo != "Loteamento":
+    st.info("As Incorporações (Horizontal/Vertical) ficam preparadas para a próxima fase do desenvolvimento.")
+    st.stop()
+
+# --- Inputs
+st.subheader("Estudo Preliminar → Loteamento")
+
+# Inicializar inputs a partir de defaults (pode substituir estes defaults por 0 se preferir)
+ins = LoteamentoInputs()
+
+# Permitir que o utilizador edite nome do projecto no topo
+ins.nome_projeto = st.text_input("Nome do projecto", value=ins.nome_projeto)
+
+# Bloco 1: Urbanístico (left) + indicadores (right)
+c1, c2 = st.columns([1.25, 0.75], gap="large")
+
+with c1:
+    st.markdown("### Dados urbanísticos")
+
+    st.markdown("#### Dados da área (m²)")
+    ins.area_total_ofertada_m2 = st.number_input("Área Total Ofertada (m²)", min_value=0.0, value=float(ins.area_total_ofertada_m2), step=1000.0, format="%.2f")
+    ins.area_app_m2 = st.number_input("APP (m²)", min_value=0.0, value=float(ins.area_app_m2), step=100.0, format="%.2f")
+    ins.area_remanescente_m2 = st.number_input("Área Remanescente (m²)", min_value=0.0, value=float(ins.area_remanescente_m2), step=100.0, format="%.2f")
+    ins.area_nao_edificante_m2 = st.number_input("Área Não‑Edificante (m²)", min_value=0.0, value=float(ins.area_nao_edificante_m2), step=100.0, format="%.2f")
+
+    st.markdown("#### Distribuição da área loteável (%)")
+    ins.pct_institucional = st.number_input("Áreas institucionais (% da loteável)", min_value=0.0, max_value=100.0, value=float(ins.pct_institucional), step=0.5, format="%.2f")
+    ins.pct_publica = st.number_input("Áreas públicas (% da loteável)", min_value=0.0, max_value=100.0, value=float(ins.pct_publica), step=0.5, format="%.2f")
+    ins.pct_viario = st.number_input("Sistema viário (% da loteável)", min_value=0.0, max_value=100.0, value=float(ins.pct_viario), step=0.5, format="%.2f")
+
+    st.markdown("#### Parâmetros do produto")
+    ins.n_lotes = st.number_input("Nº de lotes", min_value=0, value=int(ins.n_lotes), step=1)
+    ins.area_lote_medio_m2 = st.number_input("Área média do lote (m²)", min_value=0.0, value=float(ins.area_lote_medio_m2), step=1.0, format="%.2f")
+
+    st.markdown("#### Preço e permutas")
+    ins.preco_venda_r_m2 = st.number_input("Preço de venda (R$/m²)", min_value=0.0, value=float(ins.preco_venda_r_m2), step=10.0, format="%.2f")
+    ins.permuta_fisica_pct_area = st.number_input("Permuta física (% sobre área líquida de vendas)", min_value=0.0, max_value=100.0, value=float(ins.permuta_fisica_pct_area), step=0.5, format="%.2f")
+    ins.permuta_financeira_pct_vgv = st.number_input("Permuta financeira (% VGV)", min_value=0.0, max_value=100.0, value=float(ins.permuta_financeira_pct_vgv), step=0.5, format="%.2f")
+
+with c2:
+    st.markdown("### Indicadores urbanísticos")
+
+    res = compute_loteamento(ins)
+
+    if res["soma_pct_distribuicao"] > 100.0:
+        st.error(f"A soma dos percentuais (institucional + pública + viário) é {fmt_pct(res['soma_pct_distribuicao'],2)} e excede 100%. Ajuste os valores.")
+
+    st.metric("Área loteável (m²)", fmt_num_ptbr(res["area_loteavel_m2"], 2), fmt_pct(100 * (res["area_loteavel_m2"] / res["area_total_ofertada_m2"]) if res["area_total_ofertada_m2"] else 0, 2))
+    st.metric("Área lotes (vendável) (m²)", fmt_num_ptbr(res["area_lotes_vendavel_m2"], 2), fmt_pct(res["pct_lotes_vendavel"], 2))
+    st.metric("Área total em lotes (m²)", fmt_num_ptbr(res["area_total_lotes_m2"], 2))
+    st.metric("Área líquida de venda (m²)", fmt_num_ptbr(res["area_liquida_venda_m2"], 2))
+    st.metric("Ticket médio (R$)", fmt_currency(res["ticket_medio_r"]))
+    st.metric("VGV (R$)", fmt_currency(res["vgv_r"]))
+    if res["perda_permuta_fisica_r"] > 0:
+        st.warning(f"Perda por permuta física estimada: {fmt_currency(res['perda_permuta_fisica_r'])}")
+
+st.markdown("## Viabilidade económica básica")
+
+c3, c4 = st.columns([1.25, 0.75], gap="large")
+
+with c3:
+    st.markdown("### Custos")
+
+    st.markdown("#### Comercial (percentuais sobre VGV)")
+    ins.corretagem_pct_vgv = st.number_input("Corretagem (% VGV)", min_value=0.0, max_value=100.0, value=float(ins.corretagem_pct_vgv), step=0.1, format="%.2f")
+    ins.marketing_vendas_pct_vgv = st.number_input("Marketing e vendas (% VGV)", min_value=0.0, max_value=100.0, value=float(ins.marketing_vendas_pct_vgv), step=0.1, format="%.2f")
+
+    with st.expander("Opcional: Pagamento fixo – house (modelo da imagem)"):
+        ins.house_r_mes = st.number_input("R$/mês", min_value=0.0, value=float(ins.house_r_mes), step=100.0, format="%.2f")
+        ins.house_n_corretores = st.number_input("Nº corretores", min_value=0, value=int(ins.house_n_corretores), step=1)
+        ins.house_meses = st.number_input("Meses", min_value=0, value=int(ins.house_meses), step=1)
+
+    st.markdown("#### Terreno")
+    ins.terreno_r_m2 = st.number_input("Terreno (R$/m² sobre área total ofertada)", min_value=0.0, value=float(ins.terreno_r_m2), step=10.0, format="%.2f")
+
+    st.markdown("#### Obras e aprovações")
+    ins.custo_infra_r_m2_area_loteavel = st.number_input("Infraestrutura (R$/m² por área loteável)", min_value=0.0, value=float(ins.custo_infra_r_m2_area_loteavel), step=10.0, format="%.2f")
+    ins.custo_projeto_lic_r = st.number_input("Projecto e licenciamento (R$)", min_value=0.0, value=float(ins.custo_projeto_lic_r), step=10_000.0, format="%.2f")
+    ins.custo_registro_r = st.number_input("Registo (R$)", min_value=0.0, value=float(ins.custo_registro_r), step=5_000.0, format="%.2f")
+    ins.manut_pos_obra_pct_sobre_obra = st.number_input("Manutenção pós‑obra (% sobre infra)", min_value=0.0, max_value=100.0, value=float(ins.manut_pos_obra_pct_sobre_obra), step=0.1, format="%.2f")
+
+    st.markdown("#### Impostos e indirectos (percentuais sobre VGV)")
+    ins.impostos_pct_vgv = st.number_input("Impostos sobre vendas (% VGV)", min_value=0.0, max_value=100.0, value=float(ins.impostos_pct_vgv), step=0.1, format="%.2f")
+    ins.adm_gestao_pct_vgv = st.number_input("Administração e gestão (% VGV)", min_value=0.0, max_value=100.0, value=float(ins.adm_gestao_pct_vgv), step=0.1, format="%.2f")
+
+    # Recalcular depois destes inputs
+    res = compute_loteamento(ins)
+
+with c4:
+    st.markdown("### Proforma + indicadores financeiros")
+
+    lines = build_proforma_lines(res)
+    st.markdown(render_proforma_html(ins.nome_projeto, lines), unsafe_allow_html=True)
+
+    st.markdown("#### Indicadores chave")
+    st.metric("Receita líquida (R$)", fmt_currency(res["receita_liquida_r"]), fmt_pct(pct_of_vgv(res["receita_liquida_r"], res["vgv_r"], signed=True), 2))
+    st.metric("Resultado operacional (R$)", fmt_currency(res["resultado_operacional_r"]), fmt_pct(res["margem_operacional_pct_vgv"], 2))
+    st.metric("Resultado final (R$)", fmt_currency(res["resultado_final_r"]), fmt_pct(res["margem_final_pct_vgv"], 2))
+
+st.markdown("## Exportação e registo")
+
+b1, b2, b3, b4 = st.columns([1, 1, 1.2, 1], gap="medium")
+
+with b1:
+    try:
+        pdf_bytes = generate_pdf_bytes(fase, tipo, ins, res)
+        st.download_button(
+            "Exportar PDF",
+            data=pdf_bytes,
+            file_name=f"viabilidade_{ins.nome_projeto}_proforma.pdf",
+            mime="application/pdf",
+            use_container_width=True,
+        )
+    except Exception as e:
+        st.error(f"Falha ao gerar PDF: {e}")
+
+with b2:
+    try:
+        xlsx_bytes = generate_excel_bytes(fase, tipo, ins, res)
+        st.download_button(
+            "Exportar Excel",
+            data=xlsx_bytes,
+            file_name=f"viabilidade_{ins.nome_projeto}_proforma.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+        )
+    except Exception as e:
+        st.error(f"Falha ao gerar Excel: {e}")
+
+with b3:
+    if st.button("Registar premissas na Google Sheet", use_container_width=True):
+        try:
+            row = make_sheet_row(fase, tipo, ins, res)
+            append_study_to_google_sheet(row)
+            st.success("Registo feito com sucesso na aba 'viabilidade'.")
+        except Exception as e:
+            st.error(
+                "Falha ao escrever na Google Sheet. "
+                "Verifique credenciais/partilha da planilha e variáveis de ambiente. "
+                f"Detalhe: {e}"
+            )
+
+with b4:
+    if st.button("Guardar cenário para comparação", use_container_width=True):
+        save_current_study(fase, tipo, ins, res)
+        st.success("Cenário guardado.")
+
+st.markdown("## Comparação de cenários")
+
+saved = st.session_state.saved_studies
+if len(saved) == 0:
+    st.info("Ainda não há cenários guardados. Use o botão 'Guardar cenário para comparação'.")
+elif len(saved) == 1:
+    st.write(f"Cenário guardado em: **{saved[0]['saved_at']}**")
+    st.dataframe(proforma_df(saved[0]["res"]), use_container_width=True)
+else:
+    a = saved[-2]
+    b = saved[-1]
+    st.write(f"Comparação entre **{a['saved_at']}** (A) e **{b['saved_at']}** (B).")
+
+    comp = compare_two(a["res"], b["res"])
+    # Formatação simples
+    comp_fmt = comp.copy()
+    comp_fmt["R$ (A)"] = comp_fmt["R$ (A)"].map(fmt_money_plain)
+    comp_fmt["R$ (B)"] = comp_fmt["R$ (B)"].map(fmt_money_plain)
+    comp_fmt["Δ R$"] = comp_fmt["Δ R$"].map(fmt_money_plain)
+    comp_fmt["Δ %"] = comp_fmt["Δ %"].map(lambda x: fmt_pct(float(x), 2))
+    st.dataframe(comp_fmt, use_container_width=True)
+
+    st.markdown("#### Resumo da variação (principais indicadores)")
+    colx1, colx2, colx3 = st.columns(3)
+    with colx1:
+        st.metric("VGV (A → B)", fmt_currency(a["res"]["vgv_r"]), fmt_currency(b["res"]["vgv_r"]))
+    with colx2:
+        st.metric("Resultado final (A → B)", fmt_currency(a["res"]["resultado_final_r"]), fmt_currency(b["res"]["resultado_final_r"]))
+    with colx3:
+        delta = (b["res"]["resultado_final_r"] / a["res"]["resultado_final_r"] - 1.0) * 100.0 if a["res"]["resultado_final_r"] else 0.0
+        st.metric("Δ Resultado final (%)", fmt_pct(delta, 2))
