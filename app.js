@@ -1015,6 +1015,9 @@ function newStudy() {
 
 function startProject(type) {
   state.projectType = type;
+  if (!state.phase) {
+    state.phase = "estudo_preliminar";
+  }
   state.view = type === "loteamento" ? "loteamento" : "projectType";
   rerender();
 }
@@ -1050,18 +1053,45 @@ function rerender() {
   attachEvents();
 }
 
-window.setView = setView;
-window.openBenchmarks = openBenchmarks;
-window.closeBenchmarks = closeBenchmarks;
-window.saveBenchmarksLocal = saveBenchmarksLocal;
-window.syncBenchmarksToSheet = syncBenchmarksToSheet;
-window.loadBenchmarksFromSheet = loadBenchmarksFromSheet;
-window.startProject = startProject;
-window.newStudy = newStudy;
-window.saveScenario = saveScenario;
-window.clearScenarios = clearScenarios;
-window.exportPDF = exportPDF;
-window.exportExcel = exportExcel;
-window.sendStudyToSheet = sendStudyToSheet;
+function bootApp() {
+  const root = document.getElementById("root");
+  if (!root) {
+    console.error('Elemento #root não encontrado.');
+    return;
+  }
 
-rerender();
+  window.state = state;
+  window.rerender = rerender;
+  window.setView = setView;
+  window.openBenchmarks = openBenchmarks;
+  window.closeBenchmarks = closeBenchmarks;
+  window.saveBenchmarksLocal = saveBenchmarksLocal;
+  window.syncBenchmarksToSheet = syncBenchmarksToSheet;
+  window.loadBenchmarksFromSheet = loadBenchmarksFromSheet;
+  window.startProject = startProject;
+  window.newStudy = newStudy;
+  window.saveScenario = saveScenario;
+  window.clearScenarios = clearScenarios;
+  window.exportPDF = exportPDF;
+  window.exportExcel = exportExcel;
+  window.sendStudyToSheet = sendStudyToSheet;
+
+  try {
+    rerender();
+  } catch (error) {
+    console.error("Erro ao renderizar a aplicação:", error);
+    root.innerHTML = `
+      <div style="padding:24px;font-family:Arial,sans-serif">
+        <h2>Erro ao carregar a aplicação</h2>
+        <p>Abra o console do navegador para ver os detalhes.</p>
+        <pre style="white-space:pre-wrap;background:#f5f5f5;padding:12px;border-radius:8px;">${String(error && error.message ? error.message : error)}</pre>
+      </div>
+    `;
+  }
+}
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", bootApp);
+} else {
+  bootApp();
+}
