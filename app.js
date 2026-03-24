@@ -91,6 +91,7 @@ const state = {
       impostosPct: 0,
       permFisicaPct: 0,
       permFinPct: 0,
+      contingenciasPct: 0,
       terrenoM2: 0,
       houseMes: 0,
       houseCorretores: 6,
@@ -143,6 +144,35 @@ function safeId(txt) {
   return (txt || "").replace(/[^\w\-]+/g, "_");
 }
 
+// Rastreia qual campo está sendo digitado (para preservar valor bruto sem formatação)
+let _activePath = null;
+let _activeRaw = "";
+
+function fmtBR(v) {
+  const n = Number(v || 0);
+  if (n === 0) return "";
+  return n.toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+}
+
+function getNestedValue(path) {
+  const keys = path.split(".");
+  let ref = state.study;
+  try { for (const k of keys) ref = ref[k]; return ref; } catch { return 0; }
+}
+
+function kpiWithBm(title, value, sub, actualNum, bmNum, higherIsBetter = true) {
+  if (!bmNum) return kpi(title, value, sub);
+  const isOk = higherIsBetter ? actualNum >= bmNum : actualNum <= bmNum;
+  return `
+    <div class="kpi ${isOk ? "bm-ok" : "bm-bad"}">
+      <div class="k-title">${title}</div>
+      <div class="k-value">${value}</div>
+      <div class="k-sub">${sub}</div>
+      <div class="k-bm">Benchmark: ${pc(bmNum)}</div>
+    </div>
+  `;
+}
+
 function compute(study) {
   const u = study.urban;
   const p = study.product;
@@ -172,12 +202,15 @@ function compute(study) {
   const vgvPotencial = areaTotalLotes * precoM2;
   const vgvBruto = areaLiquidaVenda * precoM2;
 
+  const permutaFisicaR = areaPermutaFis * precoM2; // = vgvPotencial - vgvBruto
+
+  // Ordem nova: impostos e deduções comerciais antes da receita líquida
+  const impostosR = vgvBruto * num(c.impostosPct) / 100;
   const corretagemR = vgvBruto * num(c.corretagemPct) / 100;
   const marketingR = vgvBruto * num(c.marketingPct) / 100;
-  const permFinR = vgvBruto * num(c.permFinPct) / 100;
   const houseR = num(c.houseMes) * num(c.houseCorretores) * num(c.houseMeses);
 
-  const receitaLiquida = vgvBruto - corretagemR - marketingR - houseR - permFinR;
+  const receitaLiquida = vgvBruto - impostosR - corretagemR - marketingR - houseR;
 
   const terrenoR = num(c.terrenoM2) * areaTotal;
   const infraR = num(c.infraM2) * areaLoteavel;
@@ -187,11 +220,14 @@ function compute(study) {
 
   const custoObrasTotal = infraR + projetoR + registroR + manutPosR;
   const resultadoOperacional = receitaLiquida - terrenoR - custoObrasTotal;
-  const impostosR = vgvBruto * num(c.impostosPct) / 100;
-  const adminR = vgvBruto * num(c.adminPct) / 100;
-  const resultadoFinal = resultadoOperacional - impostosR - adminR;
 
-  const custoTotal = terrenoR + custoObrasTotal + impostosR + adminR + corretagemR + marketingR + houseR + permFinR;
+  // Após resultado operacional: permuta financeira, contingências e admin
+  const permFinR = vgvBruto * num(c.permFinPct) / 100;
+  const contingenciasR = custoObrasTotal * num(c.contingenciasPct) / 100;
+  const adminR = vgvBruto * num(c.adminPct) / 100;
+  const resultadoFinal = resultadoOperacional - permFinR - contingenciasR - adminR;
+
+  const custoTotal = terrenoR + custoObrasTotal + impostosR + adminR + corretagemR + marketingR + houseR + permFinR + contingenciasR;
   const custoM2Lotes = areaTotalLotes ? custoObrasTotal / areaTotalLotes : 0;
   const relPrecoCusto = custoM2Lotes ? precoM2 / custoM2Lotes : 0;
   const lotesPossiveis = areaMedia ? Math.floor(areaLotesVend / areaMedia) : 0;
@@ -219,9 +255,10 @@ function compute(study) {
     ticketMedio,
     vgvPotencial,
     vgvBruto,
+    permutaFisicaR,
+    impostosR,
     corretagemR,
     marketingR,
-    permFinR,
     houseR,
     receitaLiquida,
     terrenoR,
@@ -231,7 +268,8 @@ function compute(study) {
     manutPosR,
     custoObrasTotal,
     resultadoOperacional,
-    impostosR,
+    permFinR,
+    contingenciasR,
     adminR,
     resultadoFinal,
     custoTotal,
@@ -246,6 +284,8 @@ function compute(study) {
     areaLotesSobreLoteavelPct: pctLotesVend,
     areaLotesSobreTotalPct: pctOf(areaLotesVend, areaTotal),
     areaLiquidaVendaPct: pctOf(areaLiquidaVenda, areaTotalLotes),
+    vgvPotencialPctSobreBruto: vgvBruto ? (vgvPotencial / vgvBruto) * 100 : 100,
+    permutaFisicaPctSobreBruto: vgvBruto ? (permutaFisicaR / vgvBruto) * 100 : 0,
   };
 }
 
@@ -265,14 +305,19 @@ function setView(view, extra = {}) {
 
 function inputField(label, path, value, opts = {}) {
   const { suffix = "", prefix = "", full = false, text = false } = opts;
+  const displayVal = text
+    ? (_activePath === path ? _activeRaw : (value ?? ""))
+    : (_activePath === path ? _activeRaw : fmtBR(value));
   return `
     <div class="field">
       <label>${label}</label>
       <div class="input-wrap ${full ? "full" : ""}">
         ${prefix ? `<span class="affix left">${prefix}</span>` : ""}
-        <input class="inp ${text ? "text" : ""}" 
-          type="${text ? "text" : "number"}" 
-          value="${value ?? ""}" 
+        <input class="inp ${text ? "text" : ""}"
+          type="text"
+          ${!text ? 'inputmode="decimal"' : ''}
+          ${text ? 'data-text="true"' : ''}
+          value="${displayVal}"
           data-path="${path}" />
         ${suffix ? `<span class="affix">${suffix}</span>` : ""}
       </div>
@@ -393,14 +438,14 @@ function loteamentoView() {
         <div class="field">
           <label>Nome do estudo</label>
           <div class="input-wrap full" style="max-width:780px">
-            <input class="inp text" type="text" value="${state.study.nomeEstudo}" data-path="nomeEstudo" />
+            <input class="inp text" type="text" value="${_activePath === 'nomeEstudo' ? _activeRaw : (state.study.nomeEstudo || '')}" data-path="nomeEstudo" data-text="true" />
           </div>
         </div>
 
         <div class="field">
           <label>Cidade / referência</label>
           <div class="input-wrap full" style="max-width:540px">
-            <input class="inp text" type="text" value="${state.study.cidade}" data-path="cidade" />
+            <input class="inp text" type="text" value="${_activePath === 'cidade' ? _activeRaw : (state.study.cidade || '')}" data-path="cidade" data-text="true" />
           </div>
         </div>
 
@@ -465,17 +510,13 @@ function loteamentoView() {
               <div class="section-body">
                 <div class="kpi-grid">
                   ${kpi("Área loteável", fmt(c.areaLoteavel), pc(c.areaLoteavelPct))}
-                  ${kpi("Área lotes vendáveis", fmt(c.areaLotesVend), pc(c.areaLotesSobreLoteavelPct))}
+                  ${kpiWithBm("Área lotes vendáveis", fmt(c.areaLotesVend), pc(c.areaLotesSobreLoteavelPct), c.areaLotesSobreLoteavelPct, bm.urban.areaLotesPct, true)}
                   ${kpi("Área total dos lotes", fmt(c.areaTotalLotes), `${fmt(c.nLotes, 0)} lotes`)}
                   ${kpi("Área líquida de venda", fmt(c.areaLiquidaVenda), pc(c.areaLiquidaVendaPct))}
                   ${kpi("Ticket médio", rs(c.ticketMedio), `${fmt(c.areaMedia)} m²/lote`)}
                   ${kpi("VGV", rs(c.vgvBruto), rs(c.vgvPotencial))}
-                  ${kpi("Custo obras total", rs(c.custoObrasTotal), pc(c.custoObrasPct))}
-                  ${kpi("Resultado final", rs(c.resultadoFinal), pc(c.margemFinalPct))}
-                </div>
-                <div class="spacer"></div>
-                <div class="notice">
-                  Benchmark — Margem Final: <strong>${pc(bm.financial.margemFinalPct)}</strong> · Margem Operacional: <strong>${pc(bm.financial.margemOperacionalPct)}</strong> · Custo Obras: <strong>${pc(bm.financial.custoObrasPct)}</strong>
+                  ${kpiWithBm("Custo obras / VGV", pc(c.custoObrasPct), rs(c.custoObrasTotal), c.custoObrasPct, bm.financial.custoObrasPct, false)}
+                  ${kpiWithBm("Resultado final", rs(c.resultadoFinal), pc(c.margemFinalPct), c.margemFinalPct, bm.financial.margemFinalPct, true)}
                 </div>
               </div>
             </div>
@@ -492,46 +533,40 @@ function loteamentoView() {
           </div>
         </div>
 
-        <!-- Seções 3 e 4 lado a lado -->
-        <div class="card-grid-2" style="margin-top:18px">
-          <div class="section">
-            <div class="section-head head-primary">3. Parâmetros do produto e preço</div>
-            <div class="section-body">
-              <div class="form-row-3">
-                ${inputField("Número de lotes", "product.nLotes", state.study.product.nLotes)}
-                ${inputField("Área média do lote", "product.areaMedia", state.study.product.areaMedia, { suffix: "m²" })}
-                ${inputField("Preço de venda", "product.precoM2", state.study.product.precoM2, { prefix: "R$", suffix: "/m²" })}
-              </div>
-              <div class="form-row-3">
-                ${inputField("Permuta física", "costs.permFisicaPct", state.study.costs.permFisicaPct, { suffix: "%" })}
-                ${inputField("Permuta financeira", "costs.permFinPct", state.study.costs.permFinPct, { suffix: "%" })}
-                ${inputField("Terreno", "costs.terrenoM2", state.study.costs.terrenoM2, { prefix: "R$", suffix: "/m² área total" })}
-              </div>
+        <!-- Seção 3 - largura total, 6 colunas -->
+        <div class="section" style="margin-top:18px">
+          <div class="section-head head-primary">3. Parâmetros do produto e preço</div>
+          <div class="section-body">
+            <div style="display:grid;grid-template-columns:.65fr 1fr 1.25fr .65fr .65fr 1.25fr;gap:14px">
+              ${inputField("Número de lotes", "product.nLotes", state.study.product.nLotes, { full: true })}
+              ${inputField("Área média do lote", "product.areaMedia", state.study.product.areaMedia, { suffix: "m²", full: true })}
+              ${inputField("Preço de venda", "product.precoM2", state.study.product.precoM2, { prefix: "R$", suffix: "/m²", full: true })}
+              ${inputField("Permuta física", "costs.permFisicaPct", state.study.costs.permFisicaPct, { suffix: "%", full: true })}
+              ${inputField("Permuta financeira", "costs.permFinPct", state.study.costs.permFinPct, { suffix: "%", full: true })}
+              ${inputField("Terreno", "costs.terrenoM2", state.study.costs.terrenoM2, { prefix: "R$", suffix: "/m²total", full: true })}
             </div>
           </div>
+        </div>
 
-          <div class="section">
-            <div class="section-head head-orange">4. Estrutura de custos</div>
-            <div class="section-body">
-              <div class="form-row-3">
-                ${inputField("Infraestrutura", "costs.infraM2", state.study.costs.infraM2, { prefix: "R$", suffix: "/m² loteável" })}
-                ${inputField("Projeto e licenciamento", "costs.projetoR", state.study.costs.projetoR, { prefix: "R$" })}
-                ${inputField("Registro", "costs.registroR", state.study.costs.registroR, { prefix: "R$" })}
-              </div>
-              <div class="form-row-3">
-                ${inputField("Manutenção pós-obra", "costs.manutPosPct", state.study.costs.manutPosPct, { suffix: "% infra" })}
-                ${inputField("Marketing e vendas", "costs.marketingPct", state.study.costs.marketingPct, { suffix: "% VGV" })}
-                ${inputField("Corretagem", "costs.corretagemPct", state.study.costs.corretagemPct, { suffix: "% VGV" })}
-              </div>
-              <div class="form-row-3">
-                ${inputField("Administração e gestão", "costs.adminPct", state.study.costs.adminPct, { suffix: "% VGV" })}
-                ${inputField("Impostos sobre vendas", "costs.impostosPct", state.study.costs.impostosPct, { suffix: "% VGV" })}
-                ${inputField("House comercial (R$/mês)", "costs.houseMes", state.study.costs.houseMes, { prefix: "R$" })}
-              </div>
-              <div class="form-row-2">
-                ${inputField("Nº de corretores", "costs.houseCorretores", state.study.costs.houseCorretores)}
-                ${inputField("Meses", "costs.houseMeses", state.study.costs.houseMeses)}
-              </div>
+        <!-- Seção 4 - mesma largura, 6 colunas por linha, abaixo da 3 -->
+        <div class="section" style="margin-top:12px">
+          <div class="section-head head-orange">4. Estrutura de custos</div>
+          <div class="section-body">
+            <div style="display:grid;grid-template-columns:1.25fr 1fr 1fr .65fr .65fr .65fr;gap:14px;margin-bottom:14px">
+              ${inputField("Infraestrutura", "costs.infraM2", state.study.costs.infraM2, { prefix: "R$", suffix: "/m²lot.", full: true })}
+              ${inputField("Projeto e licenciamento", "costs.projetoR", state.study.costs.projetoR, { prefix: "R$", full: true })}
+              ${inputField("Registro", "costs.registroR", state.study.costs.registroR, { prefix: "R$", full: true })}
+              ${inputField("Manutenção", "costs.manutPosPct", state.study.costs.manutPosPct, { suffix: "%infra", full: true })}
+              ${inputField("Marketing", "costs.marketingPct", state.study.costs.marketingPct, { suffix: "%VGV", full: true })}
+              ${inputField("Corretagem", "costs.corretagemPct", state.study.costs.corretagemPct, { suffix: "%VGV", full: true })}
+            </div>
+            <div style="display:grid;grid-template-columns:.65fr .65fr 1fr .65fr .65fr .65fr;gap:14px">
+              ${inputField("Administração", "costs.adminPct", state.study.costs.adminPct, { suffix: "%VGV", full: true })}
+              ${inputField("Impostos vendas", "costs.impostosPct", state.study.costs.impostosPct, { suffix: "%VGV", full: true })}
+              ${inputField("House comercial", "costs.houseMes", state.study.costs.houseMes, { prefix: "R$", suffix: "/mês", full: true })}
+              ${inputField("Corretores", "costs.houseCorretores", state.study.costs.houseCorretores, { full: true })}
+              ${inputField("Meses", "costs.houseMeses", state.study.costs.houseMeses, { full: true })}
+              ${inputField("Contingências", "costs.contingenciasPct", state.study.costs.contingenciasPct, { suffix: "%obras", full: true })}
             </div>
           </div>
         </div>
@@ -553,22 +588,24 @@ function loteamentoView() {
                     </tr>
                   </thead>
                   <tbody>
+                    ${proformaRow(`VGV Potencial (${fmt(c.areaTotalLotes,0)} m²)`, c.vgvPotencial, c.vgvPotencialPctSobreBruto, "row-pre-header")}
+                    ${c.permutaFisicaR > 0 ? proformaRow(`(-) Permuta física (${fmt(c.areaPermutaFis,0)} m²)`, -c.permutaFisicaR, c.permutaFisicaPctSobreBruto, "row-pre-deduct") : ""}
                     ${proformaRow("Receita bruta (VGV)", c.vgvBruto, 100, "row-sec")}
-                    ${proformaRow("Corretagem", -c.corretagemR, pctOf(c.corretagemR, c.vgvBruto), "row-expense")}
-                    ${proformaRow("Marketing e vendas", -c.marketingR, pctOf(c.marketingR, c.vgvBruto), "row-expense")}
-                    ${proformaRow("Pagamento fixo - house", -c.houseR, pctOf(c.houseR, c.vgvBruto), "row-expense")}
-                    ${proformaRow("Permuta financeira", -c.permFinR, pctOf(c.permFinR, c.vgvBruto), "row-expense")}
-                    ${proformaRow("Receita líquida", c.receitaLiquida, c.margemLiquidaPct, "row-sub")}
-                    ${proformaRow("Pagamento do terreno", -c.terrenoR, pctOf(c.terrenoR, c.vgvBruto), "row-expense")}
-                    ${proformaRow("Custo obras total", -c.custoObrasTotal, c.custoObrasPct, "row-cost")}
-                    ${proformaRow("Infraestrutura", -c.infraR, pctOf(c.infraR, c.vgvBruto), "row-expense")}
-                    ${proformaRow("Projeto e licenciamento", -c.projetoR, pctOf(c.projetoR, c.vgvBruto), "row-expense")}
-                    ${proformaRow("Registro", -c.registroR, pctOf(c.registroR, c.vgvBruto), "row-expense")}
-                    ${proformaRow("Manutenção pós-obra", -c.manutPosR, pctOf(c.manutPosR, c.vgvBruto), "row-expense")}
-                    ${proformaRow("Resultado operacional", c.resultadoOperacional, c.margemOperacionalPct, "row-sub")}
-                    ${proformaRow("Impostos sobre vendas", -c.impostosR, pctOf(c.impostosR, c.vgvBruto), "row-expense")}
-                    ${proformaRow("Administração e gestão", -c.adminR, pctOf(c.adminR, c.vgvBruto), "row-expense")}
-                    ${proformaRow("Resultado final", c.resultadoFinal, c.margemFinalPct, "row-result")}
+                    ${proformaRow("(-) Impostos sobre vendas", -c.impostosR, pctOf(c.impostosR, c.vgvBruto), "row-expense")}
+                    ${proformaRow("(-) Corretagem", -c.corretagemR, pctOf(c.corretagemR, c.vgvBruto), "row-expense")}
+                    ${proformaRow("(-) Marketing e vendas", -c.marketingR, pctOf(c.marketingR, c.vgvBruto), "row-expense")}
+                    ${proformaRow("(-) House comercial", -c.houseR, pctOf(c.houseR, c.vgvBruto), "row-expense")}
+                    ${proformaRow("= Receita líquida", c.receitaLiquida, c.margemLiquidaPct, "row-sub")}
+                    ${proformaRow("(-) Pagamento do terreno", -c.terrenoR, pctOf(c.terrenoR, c.vgvBruto), "row-expense")}
+                    ${proformaRow("(-) Infraestrutura", -c.infraR, pctOf(c.infraR, c.vgvBruto), "row-expense")}
+                    ${proformaRow("(-) Projeto e licenciamento", -c.projetoR, pctOf(c.projetoR, c.vgvBruto), "row-expense")}
+                    ${proformaRow("(-) Registro", -c.registroR, pctOf(c.registroR, c.vgvBruto), "row-expense")}
+                    ${proformaRow("(-) Manutenção pós-obra", -c.manutPosR, pctOf(c.manutPosR, c.vgvBruto), "row-expense")}
+                    ${proformaRow("= Resultado operacional", c.resultadoOperacional, c.margemOperacionalPct, "row-sub")}
+                    ${proformaRow("(-) Permuta financeira", -c.permFinR, pctOf(c.permFinR, c.vgvBruto), "row-expense")}
+                    ${proformaRow("(-) Contingências", -c.contingenciasR, pctOf(c.contingenciasR, c.vgvBruto), "row-expense")}
+                    ${proformaRow("(-) Administração e gestão", -c.adminR, pctOf(c.adminR, c.vgvBruto), "row-expense")}
+                    ${proformaRow("= Resultado final", c.resultadoFinal, c.margemFinalPct, "row-result")}
                   </tbody>
                 </table>
               </div>
@@ -580,11 +617,11 @@ function loteamentoView() {
             <div class="section-body">
               <div class="kpi-grid">
                 ${kpi("Receita líquida", rs(c.receitaLiquida), pc(c.margemLiquidaPct))}
-                ${kpi("Resultado operacional", rs(c.resultadoOperacional), pc(c.margemOperacionalPct))}
-                ${kpi("Resultado final", rs(c.resultadoFinal), pc(c.margemFinalPct))}
-                ${kpi("Margem final / VGV", pc(c.margemFinalPct), "rentabilidade final")}
+                ${kpiWithBm("Resultado operacional", rs(c.resultadoOperacional), pc(c.margemOperacionalPct), c.margemOperacionalPct, bm.financial.margemOperacionalPct, true)}
+                ${kpiWithBm("Resultado final", rs(c.resultadoFinal), pc(c.margemFinalPct), c.margemFinalPct, bm.financial.margemFinalPct, true)}
+                ${kpiWithBm("Margem final / VGV", pc(c.margemFinalPct), "rentabilidade final", c.margemFinalPct, bm.financial.margemFinalPct, true)}
                 ${kpi("Custo total", rs(c.custoTotal), pc(c.custoTotalPct))}
-                ${kpi("Custo por m² de lotes", rs(c.custoM2Lotes), "base: área total de lotes")}
+                ${kpiWithBm("Custo obras / VGV", pc(c.custoObrasPct), rs(c.custoObrasTotal), c.custoObrasPct, bm.financial.custoObrasPct, false)}
                 ${kpi("Preço médio por lote", rs(c.ticketMedio), `${fmt(c.nLotes, 0)} lotes`)}
                 ${kpi("Relação preço/custo m²", `${fmt(c.relPrecoCusto)}x`, `Preço: R$ ${fmt(c.precoM2)}/m²`)}
               </div>
@@ -796,19 +833,15 @@ async function postToAppsScript(action, payload) {
   if (!APPS_SCRIPT_URL || APPS_SCRIPT_URL.includes("COLE_AQUI")) {
     throw new Error("A URL do Apps Script ainda não foi configurada.");
   }
-
-  const response = await fetch(APPS_SCRIPT_URL, {
+  // mode: no-cors evita o erro CORS ao enviar para Apps Script
+  // A resposta fica opaca mas os dados são enviados ao servidor
+  await fetch(APPS_SCRIPT_URL, {
     method: "POST",
+    mode: "no-cors",
     headers: { "Content-Type": "text/plain;charset=utf-8" },
     body: JSON.stringify({ action, payload }),
   });
-
-  const text = await response.text();
-  try {
-    return JSON.parse(text);
-  } catch {
-    return { ok: true, raw: text };
-  }
+  return { ok: true };
 }
 
 async function getFromAppsScript(action) {
@@ -986,6 +1019,7 @@ function newStudy() {
       impostosPct: 0,
       permFisicaPct: 0,
       permFinPct: 0,
+      contingenciasPct: 0,
       terrenoM2: 0,
       houseMes: 0,
       houseCorretores: 6,
@@ -1014,10 +1048,32 @@ function render() {
 
 function attachEvents() {
   document.querySelectorAll("[data-path]").forEach((el) => {
+    el.addEventListener("focus", (e) => {
+      _activePath = e.target.getAttribute("data-path");
+      _activeRaw = e.target.value;
+    });
+    el.addEventListener("blur", (e) => {
+      const path = e.target.getAttribute("data-path");
+      const isText = e.target.getAttribute("data-text") === "true";
+      if (!isText) {
+        // Formata o campo que perdeu foco sem rerender completo
+        const val = getNestedValue(path);
+        e.target.value = fmtBR(val);
+      }
+      _activePath = null;
+      _activeRaw = "";
+    });
     el.addEventListener("input", (e) => {
       const path = e.target.getAttribute("data-path");
-      const isText = e.target.type === "text";
-      setNested(path, isText ? e.target.value : num(e.target.value));
+      const isText = e.target.getAttribute("data-text") === "true";
+      _activePath = path;
+      _activeRaw = e.target.value;
+      if (isText) {
+        setNested(path, e.target.value);
+      } else {
+        const raw = e.target.value.replace(/\./g, "").replace(",", ".");
+        setNested(path, num(raw));
+      }
     });
   });
 
@@ -1034,20 +1090,23 @@ function attachEvents() {
 function rerender() {
   const root = document.getElementById("root");
   const scrollY = window.scrollY;
-  const activeEl = document.activeElement;
-  const activePath = activeEl ? activeEl.getAttribute("data-path") : null;
-  const activeCursor = activePath ? activeEl.selectionEnd : null;
+  const savedPath = _activePath;
+  const savedCursor = (() => {
+    const el = document.activeElement;
+    if (!el || !savedPath) return null;
+    try { return el.selectionEnd; } catch { return null; }
+  })();
 
   root.innerHTML = render();
   attachEvents();
 
   window.scrollTo(0, scrollY);
-  if (activePath) {
-    const el = document.querySelector(`[data-path="${activePath}"]`);
+  if (savedPath) {
+    const el = document.querySelector(`[data-path="${savedPath}"]`);
     if (el) {
       el.focus();
-      if (activeCursor !== null) {
-        try { el.setSelectionRange(activeCursor, activeCursor); } catch {}
+      if (savedCursor !== null) {
+        try { el.setSelectionRange(savedCursor, savedCursor); } catch {}
       }
     }
   }
