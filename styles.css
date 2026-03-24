@@ -405,6 +405,16 @@ input[type=number]{-moz-appearance:textfield}
 .row-cost td:first-child{border-left:3px solid var(--orange)}
 /* Final result */
 .row-result td{background:var(--green);color:#fff;font-weight:800;border-top:2px solid #1f6b34}
+/* Proforma preamble (VGV potencial / permuta física) */
+.row-pre-header td{background:#eef4f7;color:var(--primary);font-style:italic}
+.row-pre-deduct td{background:#fdf8f4;color:#8a4e18;font-style:italic}
+.row-pre-deduct td:first-child{padding-left:22px;border-left:3px solid #e8c49a}
+/* KPI benchmark comparison */
+.k-bm{font-size:10px;color:var(--muted);margin-top:5px;padding-top:4px;border-top:1px solid #e5edf1;font-weight:600}
+.kpi.bm-ok{background:#f0faf3;border-color:#a8d9b8}
+.kpi.bm-ok .k-value{color:#1a6b30}
+.kpi.bm-bad{background:#fef2f2;border-color:#f0aaaa}
+.kpi.bm-bad .k-value{color:var(--danger)}
 
 .compare-grid{
   display:grid;
