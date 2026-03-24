@@ -405,6 +405,13 @@ input[type=number]{-moz-appearance:textfield}
 .row-cost td:first-child{border-left:3px solid var(--orange)}
 /* Final result */
 .row-result td{background:var(--green);color:#fff;font-weight:800;border-top:2px solid #1f6b34}
+.row-result-final td{
+  font-size:16px;
+}
+.row-result-final td.num{
+  font-size:18px;
+  font-weight:900;
+}
 /* Proforma preamble (VGV potencial / permuta física) */
 .row-pre-header td{background:#eef4f7;color:var(--primary);font-style:italic}
 .row-pre-deduct td{background:#fdf8f4;color:#8a4e18;font-style:italic}
@@ -448,6 +455,24 @@ input[type=number]{-moz-appearance:textfield}
 .compare-table th:last-child{
   text-align:right;
   font-family:'JetBrains Mono',monospace;
+}
+.compare-table tr.metric-receita td:first-child,
+.compare-table tr.metric-resultado td:first-child,
+.compare-table tr.metric-resultado_pct td:first-child{
+  color:#0b6a7b;
+  font-weight:700;
+}
+.compare-table tr.metric-despesa td:first-child{
+  color:#a0561c;
+  font-weight:700;
+}
+.compare-table td.var-pos{
+  color:#1d7a34;
+  font-weight:800;
+}
+.compare-table td.var-neg{
+  color:#b23f3f;
+  font-weight:800;
 }
 .muted{
   color:var(--muted);
@@ -504,6 +529,38 @@ input[type=number]{-moz-appearance:textfield}
   margin-bottom:10px;
   font-size:15px;
 }
+.study-modal{
+  width:min(860px,94vw);
+}
+.study-list{
+  display:grid;
+  gap:10px;
+  max-height:360px;
+  overflow:auto;
+}
+.study-item{
+  width:100%;
+  border:1px solid var(--border);
+  border-radius:12px;
+  padding:12px;
+  text-align:left;
+  background:#fff;
+  color:var(--text);
+  cursor:pointer;
+}
+.study-item:hover{
+  border-color:#8db7c5;
+  background:#f5fbfe;
+}
+.study-item strong{
+  display:block;
+  font-size:14px;
+  margin-bottom:3px;
+}
+.study-item span{
+  font-size:12px;
+  color:var(--muted);
+}
 
 .notice{
   padding:12px 14px;
@@ -532,8 +589,22 @@ input[type=number]{-moz-appearance:textfield}
 @media print{
   .no-print,.page-header .btn-row,.nav-btn,.modal-overlay{display:none!important}
   body{background:#fff}
-  .container{max-width:100%;padding:0}
-  .section,.kpi,.compare-box{box-shadow:none}
+  .container{max-width:100%;padding:12px}
+  .section,.kpi,.compare-box{
+    box-shadow:none;
+    border-color:#cfdce3;
+  }
+  .section-head{
+    font-size:11px;
+    padding:8px 12px;
+  }
+  .proforma-table th,.proforma-table td{
+    font-size:11px;
+    padding:6px 8px;
+  }
+  .kpi .k-value{
+    font-size:15px;
+  }
 }
 @media (max-width:1080px){
   .card-grid-2,.card-grid-2.bottom,.benchmark-grid,.compare-grid,.card-grid-3,.form-row-3,.form-row-2{
