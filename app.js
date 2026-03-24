@@ -309,9 +309,10 @@ function setView(view, extra = {}) {
 
 function inputField(label, path, value, opts = {}) {
   const { suffix = "", prefix = "", full = false, text = false } = opts;
+  const isPercentField = suffix.includes("%");
   const displayVal = text
     ? (_activePath === path ? _activeRaw : (value ?? ""))
-    : (_activePath === path ? _activeRaw : fmtBR(value));
+    : (_activePath === path ? _activeRaw : (isPercentField ? fmt(value, 2) : fmtBR(value)));
   return `
     <div class="field">
       <label>${label}</label>
@@ -694,8 +695,8 @@ function proformaRow(label, value, pct, cls) {
   return `
     <tr class="${cls}">
       <td>${label}</td>
-      <td class="num">${value < 0 ? `(${fmt(Math.abs(value))})` : fmt(value)}</td>
-      <td class="num">${perArea < 0 ? `(R$ ${fmt(Math.abs(perArea), 2)})` : `R$ ${fmt(perArea, 2)}`}</td>
+      <td class="num col-main">${value < 0 ? `(${fmt(Math.abs(value))})` : fmt(value)}</td>
+      <td class="num col-secondary">${perArea < 0 ? `(${fmt(Math.abs(perArea), 2)})` : fmt(perArea, 2)}</td>
       <td class="num">${pc(pct)}</td>
     </tr>
   `;
@@ -765,7 +766,7 @@ function variationBox(a, b) {
     <table class="compare-table">
       <tbody>
         ${rowsA.map((row, idx) => `
-          <tr>
+          <tr class="metric-${row.kind}">
             <td>${row.label}</td>
             <td class="${deltaPct(row.value, rowsB[idx].value) >= 0 ? "var-pos" : "var-neg"}">${pc(deltaPct(row.value, rowsB[idx].value))}</td>
           </tr>
@@ -837,28 +838,25 @@ async function postToAppsScript(action, payload) {
   if (!APPS_SCRIPT_URL || APPS_SCRIPT_URL.includes("COLE_AQUI")) {
     throw new Error("A URL do Apps Script ainda não foi configurada.");
   }
-  // mode: no-cors evita o erro CORS ao enviar para Apps Script
-  // A resposta fica opaca mas os dados são enviados ao servidor
-  try {
-    const response = await fetch(APPS_SCRIPT_URL, {
-      method: "POST",
-      mode: "cors",
-      headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify({ action, payload }),
-    });
-    if (!response.ok) {
-      throw new Error(`Falha HTTP ${response.status}`);
-    }
-    return response.json();
-  } catch (error) {
-    await fetch(APPS_SCRIPT_URL, {
-      method: "POST",
-      mode: "no-cors",
-      headers: { "Content-Type": "text/plain;charset=utf-8" },
-      body: JSON.stringify({ action, payload }),
-    });
-    return { ok: true, message: "Dados enviados para a planilha (resposta opaca por CORS)." };
+  const response = await fetch(APPS_SCRIPT_URL, {
+    method: "POST",
+    headers: { "Content-Type": "text/plain" },
+    body: JSON.stringify({ action, payload }),
+  });
+  if (!response.ok) {
+    throw new Error(`Falha HTTP ${response.status}`);
   }
+  const raw = await response.text();
+  let parsed = null;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error(`Resposta inválida do Apps Script: ${raw.slice(0, 160)}`);
+  }
+  if (!parsed.ok) {
+    throw new Error(parsed.message || "Apps Script retornou erro.");
+  }
+  return parsed;
 }
 
 async function getFromAppsScript(action) {
@@ -868,7 +866,14 @@ async function getFromAppsScript(action) {
 
   const url = `${APPS_SCRIPT_URL}?action=${encodeURIComponent(action)}`;
   const response = await fetch(url);
-  return response.json();
+  if (!response.ok) {
+    throw new Error(`Falha HTTP ${response.status}`);
+  }
+  const parsed = await response.json();
+  if (!parsed.ok) {
+    throw new Error(parsed.message || "Apps Script retornou erro.");
+  }
+  return parsed;
 }
 
 function openBenchmarks() {
@@ -1123,7 +1128,10 @@ function exportExcel() {
     const pctCell = wsProforma[`D${i + 1}`];
     if (valueCell) valueCell.z = '"R$" #,##0.00';
     if (perAreaCell) perAreaCell.z = '"R$" #,##0.00';
-    if (pctCell) pctCell.z = '0.00%';
+    if (pctCell) {
+      if (typeof pctCell.v === "number") pctCell.v = pctCell.v / 100;
+      pctCell.z = '0.00%';
+    }
   }
 
   XLSX.utils.book_append_sheet(wb, wsResumo, "Resumo");

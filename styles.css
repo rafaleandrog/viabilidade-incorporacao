@@ -391,6 +391,14 @@ input[type=number]{-moz-appearance:textfield}
   text-align:right;
   font-family:'JetBrains Mono',monospace;
 }
+.proforma-table td.col-main{
+  font-size:15px;
+  font-weight:800;
+}
+.proforma-table td.col-secondary,
+.proforma-table td:nth-child(4){
+  font-size:13px;
+}
 /* Revenue header (VGV) */
 .row-sec td{background:var(--primary);color:#fff;font-weight:800}
 /* Subtotals */
@@ -465,6 +473,16 @@ input[type=number]{-moz-appearance:textfield}
 .compare-table tr.metric-despesa td:first-child{
   color:#a0561c;
   font-weight:700;
+}
+.compare-table tr.metric-receita td{
+  background:#eef8fc;
+}
+.compare-table tr.metric-resultado td,
+.compare-table tr.metric-resultado_pct td{
+  background:#edf8f0;
+}
+.compare-table tr.metric-despesa td{
+  background:#fff6ef;
 }
 .compare-table td.var-pos{
   color:#1d7a34;
