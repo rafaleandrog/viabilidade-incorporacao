@@ -1,4 +1,5 @@
 const APPS_SCRIPT_URL = "https://script.google.com/a/macros/up.bsb.br/s/AKfycbwZ9itEkqLp9QWPn5NK1olS9j9FLrGrIdVpnXIszbDL7Wv_pWL4zxBrMRlUz1MqcHq-pw/exec";
+const SPREADSHEET_ID = "17zSQ-CdCx9llm1pltkOC8XFXW3hWY751vw6xkl1MYjA";
 const STORAGE_KEYS = {
   benchmarks: "viab_benchmarks_v1",
   scenarios: "viab_scenarios_v1",
@@ -62,6 +63,9 @@ const state = {
   showBenchmarkModal: false,
   benchmarkMessage: "",
   sheetMessage: "",
+  studySheetMessage: "",
+  showStudyPickerModal: false,
+  sheetStudies: [],
   study: {
     studyId: "EST-001",
     nomeEstudo: "",
@@ -283,7 +287,7 @@ function compute(study) {
     areaLoteavelPct: pctOf(areaLoteavel, areaTotal),
     areaLotesSobreLoteavelPct: pctLotesVend,
     areaLotesSobreTotalPct: pctOf(areaLotesVend, areaTotal),
-    areaLiquidaVendaPct: pctOf(areaLiquidaVenda, areaTotalLotes),
+    areaLiquidaVendaPct: pctOf(areaTotalLotes, areaLotesVend),
     vgvPotencialPctSobreBruto: vgvBruto ? (vgvPotencial / vgvBruto) * 100 : 100,
     permutaFisicaPctSobreBruto: vgvBruto ? (permutaFisicaR / vgvBruto) * 100 : 0,
   };
@@ -305,9 +309,10 @@ function setView(view, extra = {}) {
 
 function inputField(label, path, value, opts = {}) {
   const { suffix = "", prefix = "", full = false, text = false } = opts;
+  const isPercentField = suffix.includes("%");
   const displayVal = text
     ? (_activePath === path ? _activeRaw : (value ?? ""))
-    : (_activePath === path ? _activeRaw : fmtBR(value));
+    : (_activePath === path ? _activeRaw : (isPercentField ? fmt(value, 2) : fmtBR(value)));
   return `
     <div class="field">
       <label>${label}</label>
@@ -429,8 +434,8 @@ function loteamentoView() {
           <span class="crumb">Loteamento</span>
         </div>
         <div class="btn-row">
-          <button class="btn orange" onclick="openBenchmarks()">Benchmark</button>
           <button class="btn gray" onclick="newStudy()">Novo estudo</button>
+          <button class="btn blue" onclick="openStudyPicker()">Buscar estudos salvos</button>
         </div>
       </div>
 
@@ -513,10 +518,6 @@ function loteamentoView() {
                   ${kpiWithBm("Área lotes vendáveis", fmt(c.areaLotesVend), pc(c.areaLotesSobreLoteavelPct), c.areaLotesSobreLoteavelPct, bm.urban.areaLotesPct, true)}
                   ${kpi("Área total dos lotes", fmt(c.areaTotalLotes), `${fmt(c.nLotes, 0)} lotes`)}
                   ${kpi("Área líquida de venda", fmt(c.areaLiquidaVenda), pc(c.areaLiquidaVendaPct))}
-                  ${kpi("Ticket médio", rs(c.ticketMedio), `${fmt(c.areaMedia)} m²/lote`)}
-                  ${kpi("VGV", rs(c.vgvBruto), rs(c.vgvPotencial))}
-                  ${kpiWithBm("Custo obras / VGV", pc(c.custoObrasPct), rs(c.custoObrasTotal), c.custoObrasPct, bm.financial.custoObrasPct, false)}
-                  ${kpiWithBm("Resultado final", rs(c.resultadoFinal), pc(c.margemFinalPct), c.margemFinalPct, bm.financial.margemFinalPct, true)}
                 </div>
               </div>
             </div>
@@ -537,10 +538,10 @@ function loteamentoView() {
         <div class="section" style="margin-top:18px">
           <div class="section-head head-primary">3. Parâmetros do produto e preço</div>
           <div class="section-body">
-            <div style="display:grid;grid-template-columns:.65fr 1fr 1.25fr .65fr .65fr 1.25fr;gap:14px">
+            <div style="display:grid;grid-template-columns:.65fr .9fr 1fr .65fr .8fr 1.2fr;gap:14px">
               ${inputField("Número de lotes", "product.nLotes", state.study.product.nLotes, { full: true })}
               ${inputField("Área média do lote", "product.areaMedia", state.study.product.areaMedia, { suffix: "m²", full: true })}
-              ${inputField("Preço de venda", "product.precoM2", state.study.product.precoM2, { prefix: "R$", suffix: "/m²", full: true })}
+              ${inputField("Preço por m²", "product.precoM2", state.study.product.precoM2, { prefix: "R$", suffix: "/m²", full: true })}
               ${inputField("Permuta física", "costs.permFisicaPct", state.study.costs.permFisicaPct, { suffix: "%", full: true })}
               ${inputField("Permuta financeira", "costs.permFinPct", state.study.costs.permFinPct, { suffix: "%", full: true })}
               ${inputField("Terreno", "costs.terrenoM2", state.study.costs.terrenoM2, { prefix: "R$", suffix: "/m²total", full: true })}
@@ -583,8 +584,9 @@ function loteamentoView() {
                   <thead>
                     <tr>
                       <th style="width:52%;text-align:left"></th>
-                      <th style="width:32%">R$</th>
-                      <th style="width:16%;white-space:nowrap">% VGV</th>
+                      <th style="width:20%">R$</th>
+                      <th style="width:18%">R$/m² venda líquida</th>
+                      <th style="width:10%;white-space:nowrap">% VGV</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -605,7 +607,7 @@ function loteamentoView() {
                     ${proformaRow("(-) Permuta financeira", -c.permFinR, pctOf(c.permFinR, c.vgvBruto), "row-expense")}
                     ${proformaRow("(-) Contingências", -c.contingenciasR, pctOf(c.contingenciasR, c.vgvBruto), "row-expense")}
                     ${proformaRow("(-) Administração e gestão", -c.adminR, pctOf(c.adminR, c.vgvBruto), "row-expense")}
-                    ${proformaRow("= Resultado final", c.resultadoFinal, c.margemFinalPct, "row-result")}
+                    ${proformaRow("= Resultado final", c.resultadoFinal, c.margemFinalPct, "row-result row-result-final")}
                   </tbody>
                 </table>
               </div>
@@ -658,6 +660,7 @@ function loteamentoView() {
       </div>
 
       ${state.showBenchmarkModal ? benchmarkModal() : ""}
+      ${state.showStudyPickerModal ? studyPickerModal() : ""}
     </div>
   `;
 }
@@ -688,10 +691,12 @@ function bar(label, value, total, color) {
 }
 
 function proformaRow(label, value, pct, cls) {
+  const perArea = state.calc ? (state.calc.areaLiquidaVenda ? value / state.calc.areaLiquidaVenda : 0) : 0;
   return `
     <tr class="${cls}">
       <td>${label}</td>
-      <td class="num">${value < 0 ? `(${fmt(Math.abs(value))})` : fmt(value)}</td>
+      <td class="num col-main">${value < 0 ? `(${fmt(Math.abs(value))})` : fmt(value)}</td>
+      <td class="num col-secondary">${perArea < 0 ? `(${fmt(Math.abs(perArea), 2)})` : fmt(perArea, 2)}</td>
       <td class="num">${pc(pct)}</td>
     </tr>
   `;
@@ -699,15 +704,15 @@ function proformaRow(label, value, pct, cls) {
 
 function summaryRows(calc) {
   return [
-    ["VGV", calc.vgvBruto],
-    ["Receita líquida", calc.receitaLiquida],
-    ["Terreno", calc.terrenoR],
-    ["Custo obras total", calc.custoObrasTotal],
-    ["Resultado operacional", calc.resultadoOperacional],
-    ["Impostos", calc.impostosR],
-    ["Administração e gestão", calc.adminR],
-    ["Resultado final", calc.resultadoFinal],
-    ["Margem final %", calc.margemFinalPct],
+    { label: "VGV", value: calc.vgvBruto, kind: "receita" },
+    { label: "Receita líquida", value: calc.receitaLiquida, kind: "receita" },
+    { label: "Terreno", value: calc.terrenoR, kind: "despesa" },
+    { label: "Custo obras total", value: calc.custoObrasTotal, kind: "despesa" },
+    { label: "Resultado operacional", value: calc.resultadoOperacional, kind: "resultado" },
+    { label: "Impostos", value: calc.impostosR, kind: "despesa" },
+    { label: "Administração e gestão", value: calc.adminR, kind: "despesa" },
+    { label: "Resultado final", value: calc.resultadoFinal, kind: "resultado" },
+    { label: "Margem final %", value: calc.margemFinalPct, kind: "resultado_pct" },
   ];
 }
 
@@ -741,10 +746,10 @@ function scenarioBox(item) {
     <div class="spacer"></div>
     <table class="compare-table">
       <tbody>
-        ${summaryRows(item.calc).map(([label, value], idx) => `
-          <tr>
-            <td>${label}</td>
-            <td>${idx === 8 ? pc(value) : rs(value)}</td>
+        ${summaryRows(item.calc).map((row, idx) => `
+          <tr class="metric-${row.kind}">
+            <td>${row.label}</td>
+            <td>${idx === 8 ? pc(row.value) : rs(row.value)}</td>
           </tr>
         `).join("")}
       </tbody>
@@ -761,9 +766,9 @@ function variationBox(a, b) {
     <table class="compare-table">
       <tbody>
         ${rowsA.map((row, idx) => `
-          <tr>
-            <td>${row[0]}</td>
-            <td>${pc(deltaPct(row[1], rowsB[idx][1]))}</td>
+          <tr class="metric-${row.kind}">
+            <td>${row.label}</td>
+            <td class="${deltaPct(row.value, rowsB[idx].value) >= 0 ? "var-pos" : "var-neg"}">${pc(deltaPct(row.value, rowsB[idx].value))}</td>
           </tr>
         `).join("")}
       </tbody>
@@ -843,7 +848,20 @@ async function postToAppsScript(action, payload) {
     headers: { "Content-Type": "text/plain;charset=utf-8" },
     body: JSON.stringify({ action, payload }),
   });
-  return { ok: true };
+  if (!response.ok) {
+    throw new Error(`Falha HTTP ${response.status}`);
+  }
+  const raw = await response.text();
+  let parsed = null;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error(`Resposta inválida do Apps Script: ${raw.slice(0, 160)}`);
+  }
+  if (!parsed.ok) {
+    throw new Error(parsed.message || "Apps Script retornou erro.");
+  }
+  return parsed;
 }
 
 async function getFromAppsScript(action) {
@@ -909,12 +927,114 @@ async function loadBenchmarksFromSheet() {
 
 async function sendStudyToSheet() {
   try {
-    const res = await postToAppsScript("saveStudy", buildPayload().payload);
+    const payload = buildPayload().payload;
+    const res = await postToAppsScript("saveStudy", payload);
     state.sheetMessage = res.message || "Estudo enviado para a Google Sheet com sucesso.";
   } catch (err) {
     state.sheetMessage = `Erro ao enviar estudo: ${err.message}`;
   }
   rerender();
+}
+
+function parseGvizJSON(text) {
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start === -1 || end === -1) return null;
+  return JSON.parse(text.slice(start, end + 1));
+}
+
+function normalizeStudyRecord(record = {}) {
+  const payload = record.payload_json || {};
+  return {
+    timestamp: record.timestamp || payload.timestamp || "",
+    studyId: record.studyId || (payload.study && payload.study.studyId) || "",
+    nomeEstudo: record.nomeEstudo || (payload.study && payload.study.nomeEstudo) || "Sem nome",
+    cidade: record.cidade || (payload.study && payload.study.cidade) || "",
+    study: payload.study || null,
+  };
+}
+
+async function fetchStudiesFromSheets() {
+  const gvizUrl = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?tqx=out:json&sheet=viabilidade`;
+  const response = await fetch(gvizUrl);
+  if (!response.ok) throw new Error(`Falha ao consultar planilha (${response.status})`);
+  const txt = await response.text();
+  const parsed = parseGvizJSON(txt);
+  const table = parsed && parsed.table;
+  if (!table || !table.cols || !table.rows) return [];
+  const headers = table.cols.map((c) => c.label || c.id || "").filter(Boolean);
+  const studies = table.rows.map((row) => {
+    const obj = {};
+    headers.forEach((h, idx) => {
+      let val = row.c[idx] ? row.c[idx].v : "";
+      if (h === "payload_json" && typeof val === "string") {
+        try { val = JSON.parse(val); } catch {}
+      }
+      obj[h] = val;
+    });
+    return normalizeStudyRecord(obj);
+  }).filter((s) => s.study);
+  return studies.reverse();
+}
+
+function openStudyPicker() {
+  state.showStudyPickerModal = true;
+  state.sheetStudies = [];
+  state.studySheetMessage = "Carregando estudos da planilha...";
+  rerender();
+  fetchStudiesFromSheets()
+    .then((studies) => {
+      state.sheetStudies = studies;
+      state.studySheetMessage = studies.length
+        ? "Selecione um estudo para preencher os campos automaticamente."
+        : "Nenhum estudo encontrado na aba viabilidade.";
+      rerender();
+    })
+    .catch((err) => {
+      state.studySheetMessage = `Erro ao carregar estudos: ${err.message}`;
+      rerender();
+    });
+}
+
+function applyStudyFromSheet(index) {
+  const selected = state.sheetStudies[index];
+  if (!selected || !selected.study) return;
+  state.study = clone(selected.study);
+  state.sheetMessage = `Estudo "${selected.nomeEstudo}" carregado da planilha.`;
+  state.showStudyPickerModal = false;
+  state.studySheetMessage = "";
+  rerender();
+}
+
+function studyPickerModal() {
+  return `
+    <div class="modal-overlay" onclick="closeStudyPicker(event)">
+      <div class="modal study-modal" onclick="event.stopPropagation()">
+        <h3>Estudos salvos na planilha</h3>
+        <p>${state.studySheetMessage || "Selecione um estudo para preencher o formulário."}</p>
+        <div class="study-list">
+          ${state.sheetStudies.map((s, idx) => `
+            <button class="study-item" onclick="applyStudyFromSheet(${idx})">
+              <strong>${s.nomeEstudo || "Sem nome"}</strong>
+              <span>${s.cidade || "Sem cidade"} · ${s.studyId || "Sem ID"} · ${s.timestamp ? new Date(s.timestamp).toLocaleString("pt-BR") : "-"}</span>
+            </button>
+          `).join("") || `<div class="muted">Sem estudos para listar.</div>`}
+        </div>
+        <div class="spacer"></div>
+        <div class="footer-actions">
+          <button class="btn gray" onclick="closeStudyPicker()">Fechar</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function closeStudyPicker(e) {
+  if (!e || (e.target && e.target.classList && e.target.classList.contains("modal-overlay"))) {
+    state.showStudyPickerModal = false;
+    state.studySheetMessage = "";
+    rerender();
+  }
 }
 
 function saveScenario() {
@@ -964,8 +1084,7 @@ function exportExcel() {
     ["Resultado final", c.resultadoFinal],
   ];
 
-  const proforma = [
-    ["Linha", "R$", "% VGV"],
+  const proformaRows = [
     ["Receita bruta (VGV)", c.vgvBruto, 100],
     ["Corretagem", -c.corretagemR, pctOf(c.corretagemR, c.vgvBruto)],
     ["Marketing e vendas", -c.marketingR, pctOf(c.marketingR, c.vgvBruto)],
@@ -983,9 +1102,38 @@ function exportExcel() {
     ["Administração e gestão", -c.adminR, pctOf(c.adminR, c.vgvBruto)],
     ["Resultado final", c.resultadoFinal, c.margemFinalPct],
   ];
+  const proforma = [["Linha", "R$", "R$/m² venda líquida", "% VGV"], ...proformaRows.map((row) => [
+    row[0],
+    row[1],
+    c.areaLiquidaVenda ? row[1] / c.areaLiquidaVenda : 0,
+    row[2],
+  ])];
 
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(resumo), "Resumo");
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(proforma), "Proforma");
+  const wsResumo = XLSX.utils.aoa_to_sheet(resumo);
+  wsResumo["!cols"] = [{ wch: 34 }, { wch: 24 }];
+  for (let i = 1; i < resumo.length; i += 1) {
+    const cell = wsResumo[`B${i + 1}`];
+    if (cell && typeof resumo[i][1] === "number") {
+      cell.z = "#,##0.00";
+    }
+  }
+
+  const wsProforma = XLSX.utils.aoa_to_sheet(proforma);
+  wsProforma["!cols"] = [{ wch: 34 }, { wch: 18 }, { wch: 20 }, { wch: 11 }];
+  for (let i = 1; i < proforma.length; i += 1) {
+    const valueCell = wsProforma[`B${i + 1}`];
+    const perAreaCell = wsProforma[`C${i + 1}`];
+    const pctCell = wsProforma[`D${i + 1}`];
+    if (valueCell) valueCell.z = '"R$" #,##0.00';
+    if (perAreaCell) perAreaCell.z = '"R$" #,##0.00';
+    if (pctCell) {
+      if (typeof pctCell.v === "number") pctCell.v = pctCell.v / 100;
+      pctCell.z = '0.00%';
+    }
+  }
+
+  XLSX.utils.book_append_sheet(wb, wsResumo, "Resumo");
+  XLSX.utils.book_append_sheet(wb, wsProforma, "Proforma");
 
   const nome = safeId(state.study.nomeEstudo || "viabilidade_loteamento");
   XLSX.writeFile(wb, `${nome}.xlsx`);
@@ -1136,6 +1284,9 @@ function bootApp() {
   window.exportPDF = exportPDF;
   window.exportExcel = exportExcel;
   window.sendStudyToSheet = sendStudyToSheet;
+  window.openStudyPicker = openStudyPicker;
+  window.closeStudyPicker = closeStudyPicker;
+  window.applyStudyFromSheet = applyStudyFromSheet;
 
   try {
     rerender();
