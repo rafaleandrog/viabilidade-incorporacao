@@ -925,6 +925,114 @@ async function loadBenchmarksFromSheet() {
   rerender();
 }
 
+// ─── Google Sheets: leitura de estudos via Visualization API ──────────────────
+
+function parseGvizJSON(text) {
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start === -1 || end === -1) return null;
+  return JSON.parse(text.slice(start, end + 1));
+}
+
+function normalizeStudyRecord(record = {}) {
+  const payload = record.payload_json || {};
+  return {
+    timestamp: record.timestamp || payload.timestamp || "",
+    studyId: record.studyId || (payload.study && payload.study.studyId) || "",
+    nomeEstudo: record.nomeEstudo || (payload.study && payload.study.nomeEstudo) || "Sem nome",
+    cidade: record.cidade || (payload.study && payload.study.cidade) || "",
+    study: payload.study || null,
+  };
+}
+
+async function fetchStudiesFromSheets() {
+  // Google Sheets Visualization API — suporta leitura mesmo em abas não-públicas
+  // quando o usuário está autenticado no Google (credentials: "include").
+  // A planilha precisa estar acessível ao usuário logado.
+  const gvizUrl = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?tqx=out:json&sheet=viabilidade`;
+  const response = await fetch(gvizUrl, { credentials: "include" });
+  if (!response.ok) throw new Error(`Falha ao consultar planilha (${response.status})`);
+  const txt = await response.text();
+  const parsed = parseGvizJSON(txt);
+  const table = parsed && parsed.table;
+  if (!table || !table.cols || !table.rows) return [];
+  const headers = table.cols.map((c) => c.label || c.id || "").filter(Boolean);
+  const studies = table.rows.map((row) => {
+    const obj = {};
+    headers.forEach((h, idx) => {
+      let val = row.c[idx] ? row.c[idx].v : "";
+      if (h === "payload_json" && typeof val === "string") {
+        try { val = JSON.parse(val); } catch {}
+      }
+      obj[h] = val;
+    });
+    return normalizeStudyRecord(obj);
+  }).filter((s) => s.study);
+  return studies.reverse();
+}
+
+function openStudyPicker() {
+  state.showStudyPickerModal = true;
+  state.sheetStudies = [];
+  state.studySheetMessage = "Carregando estudos da planilha...";
+  rerender();
+  fetchStudiesFromSheets()
+    .then((studies) => {
+      state.sheetStudies = studies;
+      state.studySheetMessage = studies.length
+        ? "Selecione um estudo para preencher os campos automaticamente."
+        : "Nenhum estudo encontrado na aba viabilidade. Verifique se a planilha está acessível ao seu usuário Google.";
+      rerender();
+    })
+    .catch((err) => {
+      state.studySheetMessage = `Erro ao carregar estudos: ${err.message}`;
+      rerender();
+    });
+}
+
+function applyStudyFromSheet(index) {
+  const selected = state.sheetStudies[index];
+  if (!selected || !selected.study) return;
+  state.study = clone(selected.study);
+  state.sheetMessage = `Estudo "${selected.nomeEstudo}" carregado da planilha.`;
+  state.showStudyPickerModal = false;
+  state.studySheetMessage = "";
+  rerender();
+}
+
+function studyPickerModal() {
+  return `
+    <div class="modal-overlay" onclick="closeStudyPicker(event)">
+      <div class="modal study-modal" onclick="event.stopPropagation()">
+        <h3>Estudos salvos na planilha</h3>
+        <p>${state.studySheetMessage || "Selecione um estudo para preencher o formulário."}</p>
+        <div class="study-list">
+          ${state.sheetStudies.map((s, idx) => `
+            <button class="study-item" onclick="applyStudyFromSheet(${idx})">
+              <strong>${s.nomeEstudo || "Sem nome"}</strong>
+              <span>${s.cidade || "Sem cidade"} · ${s.studyId || "Sem ID"} · ${s.timestamp ? new Date(s.timestamp).toLocaleString("pt-BR") : "-"}</span>
+            </button>
+          `).join("") || `<div class="muted">Sem estudos para listar.</div>`}
+        </div>
+        <div class="spacer"></div>
+        <div class="footer-actions">
+          <button class="btn gray" onclick="closeStudyPicker()">Fechar</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function closeStudyPicker(e) {
+  if (!e || (e.target && e.target.classList && e.target.classList.contains("modal-overlay"))) {
+    state.showStudyPickerModal = false;
+    state.studySheetMessage = "";
+    rerender();
+  }
+}
+
+// ─── Google Sheets: envio de estudo ──────────────────────────────────────────
+
 async function sendStudyToSheet() {
   try {
     const payload = buildPayload().payload;
