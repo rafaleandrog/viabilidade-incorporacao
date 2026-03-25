@@ -67,7 +67,7 @@ const state = {
   showStudyPickerModal: false,
   sheetStudies: [],
   study: {
-    studyId: "EST-001",
+    studyId: "",
     nomeEstudo: "",
     cidade: "",
     urban: {
@@ -181,7 +181,7 @@ function getNestedValue(path) {
 
 function getDefaultStudy() {
   return {
-    studyId: "EST-001",
+    studyId: "",
     nomeEstudo: "",
     cidade: "",
     urban: {
@@ -1018,7 +1018,7 @@ async function applyStudyFromSheet(index) {
   if (!selected || !selected.studyId) return;
 
   try {
-    const res = await getFromAppsScript("getStudy", { studyId: selected.rowNumber });
+    const res = await getFromAppsScript("getStudy", { studyId: selected.studyId });
     const payload = res.data;
 
     if (!payload || !payload.study) {
