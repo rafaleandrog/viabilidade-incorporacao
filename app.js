@@ -1,5 +1,5 @@
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwZ9itEkqLp9QWPn5NK1olS9j9FLrGrIdVpnXIszbDL7Wv_pWL4zxBrMRlUz1MqcHq-pw/exec";
-const SPREADSHEET_ID = "17zSQ-CdCx9llm1pltkOC8XFXW3hWY751vw6xkl1MYjA";
+
 const STORAGE_KEYS = {
   benchmarks: "viab_benchmarks_v1",
   scenarios: "viab_scenarios_v1",
@@ -115,9 +115,11 @@ function loadLocal(key, fallback) {
     return fallback;
   }
 }
+
 function saveLocal(key, value) {
   localStorage.setItem(key, JSON.stringify(value));
 }
+
 function clone(v) {
   return JSON.parse(JSON.stringify(v));
 }
@@ -128,40 +130,105 @@ function fmt(v, d = 2) {
     maximumFractionDigits: d,
   });
 }
+
 function rs(v) {
   return `R$ ${fmt(v, 2)}`;
 }
+
 function pc(v) {
   return `${fmt(v, 2)}%`;
 }
+
 function num(v) {
   const n = parseFloat(v);
   return Number.isFinite(n) ? n : 0;
 }
+
 function pctOf(value, total) {
   return total ? (value / total) * 100 : 0;
 }
+
 function deltaPct(base, value) {
   return base ? ((value / base) - 1) * 100 : 0;
 }
+
 function safeId(txt) {
   return (txt || "").replace(/[^\w\-]+/g, "_");
 }
 
-// Rastreia qual campo está sendo digitado (para preservar valor bruto sem formatação)
 let _activePath = null;
 let _activeRaw = "";
 
 function fmtBR(v) {
   const n = Number(v || 0);
   if (n === 0) return "";
-  return n.toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+  return n.toLocaleString("pt-BR", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  });
 }
 
 function getNestedValue(path) {
   const keys = path.split(".");
   let ref = state.study;
-  try { for (const k of keys) ref = ref[k]; return ref; } catch { return 0; }
+  try {
+    for (const k of keys) ref = ref[k];
+    return ref;
+  } catch {
+    return 0;
+  }
+}
+
+function getDefaultStudy() {
+  return {
+    studyId: "EST-001",
+    nomeEstudo: "",
+    cidade: "",
+    urban: {
+      areaTotal: 0,
+      percApp: 0,
+      percRem: 0,
+      percNaoEd: 0,
+      percInst: 5,
+      percPubl: 15,
+      percViario: 30,
+    },
+    product: {
+      nLotes: 0,
+      areaMedia: 0,
+      precoM2: 0,
+    },
+    costs: {
+      infraM2: 0,
+      projetoR: 0,
+      registroR: 0,
+      manutPosPct: 2,
+      marketingPct: 0,
+      corretagemPct: 0,
+      adminPct: 0,
+      impostosPct: 0,
+      permFisicaPct: 0,
+      permFinPct: 0,
+      contingenciasPct: 0,
+      terrenoM2: 0,
+      houseMes: 0,
+      houseCorretores: 6,
+      houseMeses: 6,
+    },
+  };
+}
+
+function normalizeLoadedStudy(payload) {
+  const base = getDefaultStudy();
+  const loaded = payload && payload.study ? payload.study : {};
+
+  return {
+    ...base,
+    ...loaded,
+    urban: { ...base.urban, ...(loaded.urban || {}) },
+    product: { ...base.product, ...(loaded.product || {}) },
+    costs: { ...base.costs, ...(loaded.costs || {}) },
+  };
 }
 
 function kpiWithBm(title, value, sub, actualNum, bmNum, higherIsBetter = true) {
@@ -206,9 +273,8 @@ function compute(study) {
   const vgvPotencial = areaTotalLotes * precoM2;
   const vgvBruto = areaLiquidaVenda * precoM2;
 
-  const permutaFisicaR = areaPermutaFis * precoM2; // = vgvPotencial - vgvBruto
+  const permutaFisicaR = areaPermutaFis * precoM2;
 
-  // Ordem nova: impostos e deduções comerciais antes da receita líquida
   const impostosR = vgvBruto * num(c.impostosPct) / 100;
   const corretagemR = vgvBruto * num(c.corretagemPct) / 100;
   const marketingR = vgvBruto * num(c.marketingPct) / 100;
@@ -225,7 +291,6 @@ function compute(study) {
   const custoObrasTotal = infraR + projetoR + registroR + manutPosR;
   const resultadoOperacional = receitaLiquida - terrenoR - custoObrasTotal;
 
-  // Após resultado operacional: permuta financeira, contingências e admin
   const permFinR = vgvBruto * num(c.permFinPct) / 100;
   const contingenciasR = custoObrasTotal * num(c.contingenciasPct) / 100;
   const adminR = vgvBruto * num(c.adminPct) / 100;
@@ -313,6 +378,7 @@ function inputField(label, path, value, opts = {}) {
   const displayVal = text
     ? (_activePath === path ? _activeRaw : (value ?? ""))
     : (_activePath === path ? _activeRaw : (isPercentField ? fmt(value, 2) : fmtBR(value)));
+
   return `
     <div class="field">
       <label>${label}</label>
@@ -422,7 +488,7 @@ function projectTypeView() {
 function loteamentoView() {
   state.calc = compute(state.study);
   const c = state.calc;
-  const bm = state.benchmarks.loteamento;
+  const bm = state.benchmarks.loteamento || BENCHMARK_TEMPLATE.loteamento;
 
   return `
     <div class="view">
@@ -443,18 +509,17 @@ function loteamentoView() {
         <div class="field">
           <label>Nome do estudo</label>
           <div class="input-wrap full" style="max-width:780px">
-            <input class="inp text" type="text" value="${_activePath === 'nomeEstudo' ? _activeRaw : (state.study.nomeEstudo || '')}" data-path="nomeEstudo" data-text="true" />
+            <input class="inp text" type="text" value="${_activePath === "nomeEstudo" ? _activeRaw : (state.study.nomeEstudo || "")}" data-path="nomeEstudo" data-text="true" />
           </div>
         </div>
 
         <div class="field">
           <label>Cidade / referência</label>
           <div class="input-wrap full" style="max-width:540px">
-            <input class="inp text" type="text" value="${_activePath === 'cidade' ? _activeRaw : (state.study.cidade || '')}" data-path="cidade" data-text="true" />
+            <input class="inp text" type="text" value="${_activePath === "cidade" ? _activeRaw : (state.study.cidade || "")}" data-path="cidade" data-text="true" />
           </div>
         </div>
 
-        <!-- Seções 1 e 2 à esquerda, indicadores à direita -->
         <div class="card-grid-2">
           <div>
             <div class="section">
@@ -534,7 +599,6 @@ function loteamentoView() {
           </div>
         </div>
 
-        <!-- Seção 3 - largura total, 6 colunas -->
         <div class="section" style="margin-top:18px">
           <div class="section-head head-primary">3. Parâmetros do produto e preço</div>
           <div class="section-body">
@@ -549,7 +613,6 @@ function loteamentoView() {
           </div>
         </div>
 
-        <!-- Seção 4 - mesma largura, 6 colunas por linha, abaixo da 3 -->
         <div class="section" style="margin-top:12px">
           <div class="section-head head-orange">4. Estrutura de custos</div>
           <div class="section-body">
@@ -572,7 +635,6 @@ function loteamentoView() {
           </div>
         </div>
 
-        <!-- Proforma à esquerda, KPIs + ações à direita -->
         <div class="card-grid-2" style="margin-top:18px">
           <div class="section">
             <div class="section-head head-primary">Proforma financeiro</div>
@@ -590,8 +652,8 @@ function loteamentoView() {
                     </tr>
                   </thead>
                   <tbody>
-                    ${proformaRow(`VGV Potencial (${fmt(c.areaTotalLotes,0)} m²)`, c.vgvPotencial, c.vgvPotencialPctSobreBruto, "row-pre-header")}
-                    ${c.permutaFisicaR > 0 ? proformaRow(`(-) Permuta física (${fmt(c.areaPermutaFis,0)} m²)`, -c.permutaFisicaR, c.permutaFisicaPctSobreBruto, "row-pre-deduct") : ""}
+                    ${proformaRow(`VGV Potencial (${fmt(c.areaTotalLotes, 0)} m²)`, c.vgvPotencial, c.vgvPotencialPctSobreBruto, "row-pre-header")}
+                    ${c.permutaFisicaR > 0 ? proformaRow(`(-) Permuta física (${fmt(c.areaPermutaFis, 0)} m²)`, -c.permutaFisicaR, c.permutaFisicaPctSobreBruto, "row-pre-deduct") : ""}
                     ${proformaRow("Receita bruta (VGV)", c.vgvBruto, 100, "row-sec")}
                     ${proformaRow("(-) Impostos sobre vendas", -c.impostosR, pctOf(c.impostosR, c.vgvBruto), "row-expense")}
                     ${proformaRow("(-) Corretagem", -c.corretagemR, pctOf(c.corretagemR, c.vgvBruto), "row-expense")}
@@ -643,7 +705,6 @@ function loteamentoView() {
           </div>
         </div>
 
-        <!-- Comparação de cenários ao final -->
         <div class="section" style="margin-top:18px">
           <div class="section-head head-green">Comparação de cenários</div>
           <div class="section-body">
@@ -839,30 +900,17 @@ async function postToAppsScript(action, payload) {
     throw new Error("A URL do Apps Script ainda não foi configurada.");
   }
 
-  const response = await fetch(APPS_SCRIPT_URL, {
+  await fetch(APPS_SCRIPT_URL, {
     method: "POST",
+    mode: "no-cors",
     headers: { "Content-Type": "text/plain;charset=utf-8" },
     body: JSON.stringify({ action, payload }),
   });
 
-  if (!response.ok) {
-    throw new Error(`Falha HTTP ${response.status}`);
-  }
-
-  const raw = await response.text();
-
-  let parsed;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    throw new Error(`Resposta inválida do Apps Script: ${raw.slice(0, 160)}`);
-  }
-
-  if (!parsed.ok) {
-    throw new Error(parsed.message || "Apps Script retornou erro.");
-  }
-
-  return parsed;
+  return {
+    ok: true,
+    message: "Requisição enviada ao Apps Script."
+  };
 }
 
 async function getFromAppsScript(action, params = {}) {
@@ -918,8 +966,8 @@ function saveBenchmarksLocal() {
 async function syncBenchmarksToSheet() {
   try {
     saveLocal(STORAGE_KEYS.benchmarks, state.benchmarks);
-    const res = await postToAppsScript("saveBenchmarks", state.benchmarks);
-    const msg = res.message || "Benchmarks enviados para a planilha com sucesso.";
+    await postToAppsScript("saveBenchmarks", state.benchmarks);
+    const msg = "Benchmarks enviados para a planilha. Aguarde 1 a 2 segundos e confira a aba benchmarks.";
     state.benchmarkMessage = msg;
     state.sheetMessage = msg;
   } catch (err) {
@@ -946,8 +994,6 @@ async function loadBenchmarksFromSheet() {
   rerender();
 }
 
-// ─── Google Sheets: leitura de estudos via Visualization API ──────────────────
-
 async function openStudyPicker() {
   state.showStudyPickerModal = true;
   state.sheetStudies = [];
@@ -956,7 +1002,7 @@ async function openStudyPicker() {
 
   try {
     const res = await getFromAppsScript("listStudies");
-    state.sheetStudies = res.data || [];
+    state.sheetStudies = Array.isArray(res.data) ? res.data : [];
     state.studySheetMessage = state.sheetStudies.length
       ? "Selecione um estudo para preencher os campos automaticamente."
       : "Nenhum estudo encontrado na aba viabilidade.";
@@ -979,9 +1025,10 @@ async function applyStudyFromSheet(index) {
       throw new Error("O estudo retornado não possui estrutura válida.");
     }
 
-    state.study = clone(payload.study);
+    state.study = normalizeLoadedStudy(payload);
     state.phase = payload.phase || "estudo_preliminar";
     state.projectType = payload.projectType || "loteamento";
+    state.view = "loteamento";
     state.sheetMessage = `Estudo "${selected.nomeEstudo}" carregado da planilha.`;
     state.showStudyPickerModal = false;
     state.studySheetMessage = "";
@@ -1023,13 +1070,11 @@ function closeStudyPicker(e) {
   }
 }
 
-// ─── Google Sheets: envio de estudo ──────────────────────────────────────────
-
 async function sendStudyToSheet() {
   try {
     const payload = buildPayload().payload;
-    const res = await postToAppsScript("saveStudy", payload);
-    state.sheetMessage = res.message || "Estudo enviado para a Google Sheet com sucesso.";
+    await postToAppsScript("saveStudy", payload);
+    state.sheetMessage = "Estudo enviado para a Google Sheet. Aguarde 1 a 2 segundos e confira a aba viabilidade.";
   } catch (err) {
     state.sheetMessage = `Erro ao enviar estudo: ${err.message}`;
   }
@@ -1101,12 +1146,16 @@ function exportExcel() {
     ["Administração e gestão", -c.adminR, pctOf(c.adminR, c.vgvBruto)],
     ["Resultado final", c.resultadoFinal, c.margemFinalPct],
   ];
-  const proforma = [["Linha", "R$", "R$/m² venda líquida", "% VGV"], ...proformaRows.map((row) => [
-    row[0],
-    row[1],
-    c.areaLiquidaVenda ? row[1] / c.areaLiquidaVenda : 0,
-    row[2],
-  ])];
+
+  const proforma = [
+    ["Linha", "R$", "R$/m² venda líquida", "% VGV"],
+    ...proformaRows.map((row) => [
+      row[0],
+      row[1],
+      c.areaLiquidaVenda ? row[1] / c.areaLiquidaVenda : 0,
+      row[2],
+    ]),
+  ];
 
   const wsResumo = XLSX.utils.aoa_to_sheet(resumo);
   wsResumo["!cols"] = [{ wch: 34 }, { wch: 24 }];
@@ -1127,7 +1176,7 @@ function exportExcel() {
     if (perAreaCell) perAreaCell.z = '"R$" #,##0.00';
     if (pctCell) {
       if (typeof pctCell.v === "number") pctCell.v = pctCell.v / 100;
-      pctCell.z = '0.00%';
+      pctCell.z = "0.00%";
     }
   }
 
@@ -1139,42 +1188,7 @@ function exportExcel() {
 }
 
 function newStudy() {
-  state.study = {
-    studyId: "EST-001",
-    nomeEstudo: "",
-    cidade: "",
-    urban: {
-      areaTotal: 0,
-      percApp: 0,
-      percRem: 0,
-      percNaoEd: 0,
-      percInst: 5,
-      percPubl: 15,
-      percViario: 30,
-    },
-    product: {
-      nLotes: 0,
-      areaMedia: 0,
-      precoM2: 0,
-    },
-    costs: {
-      infraM2: 0,
-      projetoR: 0,
-      registroR: 0,
-      manutPosPct: 2,
-      marketingPct: 0,
-      corretagemPct: 0,
-      adminPct: 0,
-      impostosPct: 0,
-      permFisicaPct: 0,
-      permFinPct: 0,
-      contingenciasPct: 0,
-      terrenoM2: 0,
-      houseMes: 0,
-      houseCorretores: 6,
-      houseMeses: 6,
-    },
-  };
+  state.study = getDefaultStudy();
   state.sheetMessage = "Novo estudo iniciado.";
   rerender();
 }
@@ -1201,22 +1215,24 @@ function attachEvents() {
       _activePath = e.target.getAttribute("data-path");
       _activeRaw = e.target.value;
     });
+
     el.addEventListener("blur", (e) => {
       const path = e.target.getAttribute("data-path");
       const isText = e.target.getAttribute("data-text") === "true";
       if (!isText) {
-        // Formata o campo que perdeu foco sem rerender completo
         const val = getNestedValue(path);
         e.target.value = fmtBR(val);
       }
       _activePath = null;
       _activeRaw = "";
     });
+
     el.addEventListener("input", (e) => {
       const path = e.target.getAttribute("data-path");
       const isText = e.target.getAttribute("data-text") === "true";
       _activePath = path;
       _activeRaw = e.target.value;
+
       if (isText) {
         setNested(path, e.target.value);
       } else {
@@ -1243,7 +1259,11 @@ function rerender() {
   const savedCursor = (() => {
     const el = document.activeElement;
     if (!el || !savedPath) return null;
-    try { return el.selectionEnd; } catch { return null; }
+    try {
+      return el.selectionEnd;
+    } catch {
+      return null;
+    }
   })();
 
   root.innerHTML = render();
@@ -1255,7 +1275,9 @@ function rerender() {
     if (el) {
       el.focus();
       if (savedCursor !== null) {
-        try { el.setSelectionRange(savedCursor, savedCursor); } catch {}
+        try {
+          el.setSelectionRange(savedCursor, savedCursor);
+        } catch {}
       }
     }
   }
@@ -1264,7 +1286,7 @@ function rerender() {
 function bootApp() {
   const root = document.getElementById("root");
   if (!root) {
-    console.error('Elemento #root não encontrado.');
+    console.error("Elemento #root não encontrado.");
     return;
   }
 
