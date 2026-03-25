@@ -1015,7 +1015,7 @@ async function openStudyPicker() {
 
 async function applyStudyFromSheet(index) {
   const selected = state.sheetStudies[index];
-  if (!selected || !selected.studyId) return;
+  if (!selected || !selected.id) return;
 
   try {
     const res = await getFromAppsScript("getStudy", { id: selected.id });
