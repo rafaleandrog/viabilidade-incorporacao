@@ -1106,85 +1106,419 @@ function exportPDF() {
   window.print();
 }
 
-function exportExcel() {
+async function exportExcel() {
   const c = compute(state.study);
-  const wb = XLSX.utils.book_new();
+  const wb = new ExcelJS.Workbook();
 
-  const resumo = [
-    ["Campo", "Valor"],
-    ["Nome do estudo", state.study.nomeEstudo],
-    ["Cidade", state.study.cidade],
-    ["Fase", state.phase],
-    ["Tipo de projeto", state.projectType],
-    ["Área total", c.areaTotal],
-    ["Área loteável", c.areaLoteavel],
-    ["Área lotes vendáveis", c.areaLotesVend],
-    ["Número de lotes", c.nLotes],
-    ["Área média do lote", c.areaMedia],
-    ["Preço venda R$/m²", c.precoM2],
-    ["VGV", c.vgvBruto],
-    ["Receita líquida", c.receitaLiquida],
-    ["Resultado operacional", c.resultadoOperacional],
-    ["Resultado final", c.resultadoFinal],
+  wb.creator = "Viabilidade Imobiliária";
+  wb.lastModifiedBy = "Viabilidade Imobiliária";
+  wb.created = new Date();
+  wb.modified = new Date();
+  wb.company = "UP";
+  wb.subject = "Estudo de viabilidade";
+  wb.title = state.study.nomeEstudo || "Viabilidade Loteamento";
+
+  const nomeEstudo = state.study.nomeEstudo || "Sem nome";
+  const cidade = state.study.cidade || "-";
+  const fase = state.phase || "-";
+  const tipoProjeto = state.projectType || "-";
+
+  const moneyFmt = 'R$ #,##0.00';
+  const numFmt = '#,##0.00';
+  const pctFmt = '0.00%';
+
+  function applyTitle(cell, text, fill = "064B59") {
+    cell.value = text;
+    cell.font = { bold: true, size: 16, color: { argb: "FFFFFFFF" } };
+    cell.alignment = { vertical: "middle", horizontal: "center" };
+    cell.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: fill }
+    };
+    cell.border = {
+      top: { style: "thin", color: { argb: "FFFFFFFF" } },
+      left: { style: "thin", color: { argb: "FFFFFFFF" } },
+      bottom: { style: "thin", color: { argb: "FFFFFFFF" } },
+      right: { style: "thin", color: { argb: "FFFFFFFF" } }
+    };
+  }
+
+  function applySectionHeader(cell, text, fill = "0B5C6B") {
+    cell.value = text;
+    cell.font = { bold: true, size: 12, color: { argb: "FFFFFFFF" } };
+    cell.alignment = { vertical: "middle", horizontal: "left" };
+    cell.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: fill }
+    };
+    cell.border = {
+      top: { style: "thin", color: { argb: "FFFFFFFF" } },
+      left: { style: "thin", color: { argb: "FFFFFFFF" } },
+      bottom: { style: "thin", color: { argb: "FFFFFFFF" } },
+      right: { style: "thin", color: { argb: "FFFFFFFF" } }
+    };
+  }
+
+  function applyLabel(cell) {
+    cell.font = { bold: true, size: 10, color: { argb: "1F2937" } };
+    cell.alignment = { vertical: "middle", horizontal: "left" };
+    cell.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: "F3F4F6" }
+    };
+    cell.border = {
+      top: { style: "thin", color: { argb: "D1D5DB" } },
+      left: { style: "thin", color: { argb: "D1D5DB" } },
+      bottom: { style: "thin", color: { argb: "D1D5DB" } },
+      right: { style: "thin", color: { argb: "D1D5DB" } }
+    };
+  }
+
+  function applyValue(cell, format = null, bold = false) {
+    cell.font = { bold, size: 10, color: { argb: "111827" } };
+    cell.alignment = { vertical: "middle", horizontal: "right" };
+    cell.border = {
+      top: { style: "thin", color: { argb: "D1D5DB" } },
+      left: { style: "thin", color: { argb: "D1D5DB" } },
+      bottom: { style: "thin", color: { argb: "D1D5DB" } },
+      right: { style: "thin", color: { argb: "D1D5DB" } }
+    };
+    if (format) cell.numFmt = format;
+  }
+
+  function applyTextValue(cell, bold = false) {
+    cell.font = { bold, size: 10, color: { argb: "111827" } };
+    cell.alignment = { vertical: "middle", horizontal: "left" };
+    cell.border = {
+      top: { style: "thin", color: { argb: "D1D5DB" } },
+      left: { style: "thin", color: { argb: "D1D5DB" } },
+      bottom: { style: "thin", color: { argb: "D1D5DB" } },
+      right: { style: "thin", color: { argb: "D1D5DB" } }
+    };
+  }
+
+  function applyKpiBox(ws, startRow, startCol, title, value, subtitle, isMoney = false, isPercent = false) {
+    const titleCell = ws.getCell(startRow, startCol);
+    const valueCell = ws.getCell(startRow + 1, startCol);
+    const subCell = ws.getCell(startRow + 2, startCol);
+
+    ws.mergeCells(startRow, startCol, startRow, startCol + 2);
+    ws.mergeCells(startRow + 1, startCol, startRow + 1, startCol + 2);
+    ws.mergeCells(startRow + 2, startCol, startRow + 2, startCol + 2);
+
+    titleCell.value = title;
+    titleCell.font = { bold: true, size: 10, color: { argb: "4B5563" } };
+    titleCell.alignment = { vertical: "middle", horizontal: "left" };
+    titleCell.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: "EFF6FF" }
+    };
+
+    valueCell.value = value;
+    valueCell.font = { bold: true, size: 16, color: { argb: "1F4B8F" } };
+    valueCell.alignment = { vertical: "middle", horizontal: "left" };
+
+    if (typeof value === "number") {
+      if (isMoney) valueCell.numFmt = moneyFmt;
+      if (isPercent) valueCell.numFmt = pctFmt;
+      if (!isMoney && !isPercent) valueCell.numFmt = numFmt;
+    }
+
+    subCell.value = subtitle;
+    subCell.font = { size: 10, color: { argb: "6B7280" } };
+    subCell.alignment = { vertical: "middle", horizontal: "left" };
+
+    [titleCell, valueCell, subCell].forEach((cell) => {
+      cell.border = {
+        top: { style: "thin", color: { argb: "BFDBFE" } },
+        left: { style: "thin", color: { argb: "BFDBFE" } },
+        bottom: { style: "thin", color: { argb: "BFDBFE" } },
+        right: { style: "thin", color: { argb: "BFDBFE" } }
+      };
+    });
+  }
+
+  // =========================
+  // ABA 1 - RESUMO EXECUTIVO
+  // =========================
+  const wsResumo = wb.addWorksheet("Resumo Executivo", {
+    views: [{ state: "frozen", ySplit: 5 }]
+  });
+
+  wsResumo.columns = [
+    { width: 24 },
+    { width: 18 },
+    { width: 18 },
+    { width: 18 },
+    { width: 18 },
+    { width: 18 },
+    { width: 18 },
+    { width: 18 },
+    { width: 18 },
+    { width: 18 },
+    { width: 18 },
+    { width: 18 }
   ];
+
+  wsResumo.mergeCells("A1:L1");
+  applyTitle(wsResumo.getCell("A1"), "PROFORMA LOTEAMENTO", "075985");
+  wsResumo.getRow(1).height = 26;
+
+  wsResumo.mergeCells("A2:L2");
+  wsResumo.getCell("A2").value = nomeEstudo;
+  wsResumo.getCell("A2").font = { bold: true, size: 14, color: { argb: "1F2937" } };
+  wsResumo.getCell("A2").alignment = { horizontal: "center", vertical: "middle" };
+  wsResumo.getRow(2).height = 22;
+
+  applySectionHeader(wsResumo.getCell("A4"), "IDENTIFICAÇÃO", "0B5C6B");
+  wsResumo.mergeCells("A4:F4");
+
+  const identificacao = [
+    ["Cidade / Referência", cidade],
+    ["Fase", fase],
+    ["Tipo de projeto", tipoProjeto],
+    ["Study ID", state.study.studyId || ""]
+  ];
+
+  let row = 5;
+  identificacao.forEach(([label, value]) => {
+    applyLabel(wsResumo.getCell(`A${row}`));
+    wsResumo.getCell(`A${row}`).value = label;
+    wsResumo.mergeCells(`B${row}:F${row}`);
+    applyTextValue(wsResumo.getCell(`B${row}`));
+    wsResumo.getCell(`B${row}`).value = value;
+    row++;
+  });
+
+  applySectionHeader(wsResumo.getCell("H4"), "INDICADORES URBANÍSTICOS", "C8752A");
+  wsResumo.mergeCells("H4:L4");
+
+  const urb = [
+    ["Área loteável", c.areaLoteavel, numFmt],
+    ["Área lotes vendáveis", c.areaLotesVend, numFmt],
+    ["Área total dos lotes", c.areaTotalLotes, numFmt],
+    ["Área líquida de venda", c.areaLiquidaVenda, numFmt],
+    ["Lotes possíveis", c.lotesPossiveis, '0'],
+    ["Área média calculada", c.areaMediaCalculada, numFmt]
+  ];
+
+  row = 5;
+  urb.forEach(([label, value, fmtLocal]) => {
+    applyLabel(wsResumo.getCell(`H${row}`));
+    wsResumo.getCell(`H${row}`).value = label;
+    wsResumo.mergeCells(`I${row}:L${row}`);
+    applyValue(wsResumo.getCell(`I${row}`), fmtLocal);
+    wsResumo.getCell(`I${row}`).value = value;
+    row++;
+  });
+
+  applySectionHeader(wsResumo.getCell("A11"), "INDICADORES FINANCEIROS", "0B5C6B");
+  wsResumo.mergeCells("A11:L11");
+
+  applyKpiBox(wsResumo, 12, 1, "Receita líquida", c.receitaLiquida, `${fmt(c.margemLiquidaPct)}%`, true, false);
+  applyKpiBox(wsResumo, 12, 4, "Resultado operacional", c.resultadoOperacional, `${fmt(c.margemOperacionalPct)}%`, true, false);
+  applyKpiBox(wsResumo, 12, 7, "Resultado final", c.resultadoFinal, `${fmt(c.margemFinalPct)}%`, true, false);
+  applyKpiBox(wsResumo, 12, 10, "Margem final / VGV", c.margemFinalPct / 100, "rentabilidade final", false, true);
+
+  applyKpiBox(wsResumo, 16, 1, "Custo total", c.custoTotal, `${fmt(c.custoTotalPct)}%`, true, false);
+  applyKpiBox(wsResumo, 16, 4, "Custo obras total", c.custoObrasTotal, `${fmt(c.custoObrasPct)}%`, true, false);
+  applyKpiBox(wsResumo, 16, 7, "Preço médio por lote", c.ticketMedio, `${fmt(c.nLotes, 0)} lotes`, true, false);
+  applyKpiBox(wsResumo, 16, 10, "Relação preço/custo m²", c.relPrecoCusto, `Preço: R$ ${fmt(c.precoM2)}/m²`, false, false);
+
+  // =========================
+  // ABA 2 - PROFORMA
+  // =========================
+  const wsProforma = wb.addWorksheet("Proforma");
+
+  wsProforma.columns = [
+    { width: 42 },
+    { width: 18 },
+    { width: 20 },
+    { width: 14 }
+  ];
+
+  wsProforma.mergeCells("A1:D1");
+  applyTitle(wsProforma.getCell("A1"), "PROFORMA LOTEAMENTO", "075985");
+
+  wsProforma.mergeCells("A2:D2");
+  wsProforma.getCell("A2").value = nomeEstudo;
+  wsProforma.getCell("A2").font = { bold: true, size: 13, color: { argb: "1F2937" } };
+  wsProforma.getCell("A2").alignment = { horizontal: "center", vertical: "middle" };
+
+  const headerRow = wsProforma.getRow(4);
+  ["Linha", "R$", "R$/m² venda líquida", "% VGV"].forEach((txt, i) => {
+    const cell = headerRow.getCell(i + 1);
+    cell.value = txt;
+    cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+    cell.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: "0B5C6B" }
+    };
+    cell.alignment = { horizontal: i === 0 ? "left" : "center", vertical: "middle" };
+    cell.border = {
+      top: { style: "thin", color: { argb: "FFFFFF" } },
+      left: { style: "thin", color: { argb: "FFFFFF" } },
+      bottom: { style: "thin", color: { argb: "FFFFFF" } },
+      right: { style: "thin", color: { argb: "FFFFFF" } }
+    };
+  });
 
   const proformaRows = [
-    ["Receita bruta (VGV)", c.vgvBruto, 100],
-    ["Corretagem", -c.corretagemR, pctOf(c.corretagemR, c.vgvBruto)],
-    ["Marketing e vendas", -c.marketingR, pctOf(c.marketingR, c.vgvBruto)],
-    ["Pagamento fixo - house", -c.houseR, pctOf(c.houseR, c.vgvBruto)],
-    ["Permuta financeira", -c.permFinR, pctOf(c.permFinR, c.vgvBruto)],
-    ["Receita líquida", c.receitaLiquida, c.margemLiquidaPct],
-    ["Pagamento do terreno", -c.terrenoR, pctOf(c.terrenoR, c.vgvBruto)],
-    ["Custo obras total", -c.custoObrasTotal, c.custoObrasPct],
-    ["Infraestrutura", -c.infraR, pctOf(c.infraR, c.vgvBruto)],
-    ["Projeto e licenciamento", -c.projetoR, pctOf(c.projetoR, c.vgvBruto)],
-    ["Registro", -c.registroR, pctOf(c.registroR, c.vgvBruto)],
-    ["Manutenção pós-obra", -c.manutPosR, pctOf(c.manutPosR, c.vgvBruto)],
-    ["Resultado operacional", c.resultadoOperacional, c.margemOperacionalPct],
-    ["Impostos sobre vendas", -c.impostosR, pctOf(c.impostosR, c.vgvBruto)],
-    ["Administração e gestão", -c.adminR, pctOf(c.adminR, c.vgvBruto)],
-    ["Resultado final", c.resultadoFinal, c.margemFinalPct],
+    [`VGV Potencial (${fmt(c.areaTotalLotes, 0)} m²)`, c.vgvPotencial, c.areaLiquidaVenda ? c.vgvPotencial / c.areaLiquidaVenda : 0, c.vgvPotencialPctSobreBruto / 100, "header"],
+    ...(c.permutaFisicaR > 0
+      ? [[`(-) Permuta física (${fmt(c.areaPermutaFis, 0)} m²)`, -c.permutaFisicaR, c.areaLiquidaVenda ? -c.permutaFisicaR / c.areaLiquidaVenda : 0, c.permutaFisicaPctSobreBruto / 100, "deduct"]]
+      : []),
+    ["Receita bruta (VGV)", c.vgvBruto, c.areaLiquidaVenda ? c.vgvBruto / c.areaLiquidaVenda : 0, 1, "main"],
+    ["(-) Impostos sobre vendas", -c.impostosR, c.areaLiquidaVenda ? -c.impostosR / c.areaLiquidaVenda : 0, pctOf(c.impostosR, c.vgvBruto) / 100, "expense"],
+    ["(-) Corretagem", -c.corretagemR, c.areaLiquidaVenda ? -c.corretagemR / c.areaLiquidaVenda : 0, pctOf(c.corretagemR, c.vgvBruto) / 100, "expense"],
+    ["(-) Marketing e vendas", -c.marketingR, c.areaLiquidaVenda ? -c.marketingR / c.areaLiquidaVenda : 0, pctOf(c.marketingR, c.vgvBruto) / 100, "expense"],
+    ["(-) House comercial", -c.houseR, c.areaLiquidaVenda ? -c.houseR / c.areaLiquidaVenda : 0, pctOf(c.houseR, c.vgvBruto) / 100, "expense"],
+    ["= Receita líquida", c.receitaLiquida, c.areaLiquidaVenda ? c.receitaLiquida / c.areaLiquidaVenda : 0, c.margemLiquidaPct / 100, "subtotal"],
+    ["(-) Pagamento do terreno", -c.terrenoR, c.areaLiquidaVenda ? -c.terrenoR / c.areaLiquidaVenda : 0, pctOf(c.terrenoR, c.vgvBruto) / 100, "expense"],
+    ["(-) Infraestrutura", -c.infraR, c.areaLiquidaVenda ? -c.infraR / c.areaLiquidaVenda : 0, pctOf(c.infraR, c.vgvBruto) / 100, "expense"],
+    ["(-) Projeto e licenciamento", -c.projetoR, c.areaLiquidaVenda ? -c.projetoR / c.areaLiquidaVenda : 0, pctOf(c.projetoR, c.vgvBruto) / 100, "expense"],
+    ["(-) Registro", -c.registroR, c.areaLiquidaVenda ? -c.registroR / c.areaLiquidaVenda : 0, pctOf(c.registroR, c.vgvBruto) / 100, "expense"],
+    ["(-) Manutenção pós-obra", -c.manutPosR, c.areaLiquidaVenda ? -c.manutPosR / c.areaLiquidaVenda : 0, pctOf(c.manutPosR, c.vgvBruto) / 100, "expense"],
+    ["= Resultado operacional", c.resultadoOperacional, c.areaLiquidaVenda ? c.resultadoOperacional / c.areaLiquidaVenda : 0, c.margemOperacionalPct / 100, "subtotal"],
+    ["(-) Permuta financeira", -c.permFinR, c.areaLiquidaVenda ? -c.permFinR / c.areaLiquidaVenda : 0, pctOf(c.permFinR, c.vgvBruto) / 100, "expense"],
+    ["(-) Contingências", -c.contingenciasR, c.areaLiquidaVenda ? -c.contingenciasR / c.areaLiquidaVenda : 0, pctOf(c.contingenciasR, c.vgvBruto) / 100, "expense"],
+    ["(-) Administração e gestão", -c.adminR, c.areaLiquidaVenda ? -c.adminR / c.areaLiquidaVenda : 0, pctOf(c.adminR, c.vgvBruto) / 100, "expense"],
+    ["= Resultado final", c.resultadoFinal, c.areaLiquidaVenda ? c.resultadoFinal / c.areaLiquidaVenda : 0, c.margemFinalPct / 100, "result"]
   ];
 
-  const proforma = [
-    ["Linha", "R$", "R$/m² venda líquida", "% VGV"],
-    ...proformaRows.map((row) => [
-      row[0],
-      row[1],
-      c.areaLiquidaVenda ? row[1] / c.areaLiquidaVenda : 0,
-      row[2],
-    ]),
+  let proformaStart = 5;
+  proformaRows.forEach(([label, v1, v2, v3, kind], i) => {
+    const r = wsProforma.getRow(proformaStart + i);
+    r.getCell(1).value = label;
+    r.getCell(2).value = v1;
+    r.getCell(3).value = v2;
+    r.getCell(4).value = v3;
+
+    r.getCell(2).numFmt = moneyFmt;
+    r.getCell(3).numFmt = moneyFmt;
+    r.getCell(4).numFmt = pctFmt;
+
+    let fill = "FFFFFF";
+    let fontColor = "111827";
+    let bold = false;
+
+    if (kind === "header") { fill = "EAF4EA"; bold = true; }
+    if (kind === "deduct") { fill = "FCE7E7"; }
+    if (kind === "main") { fill = "DDEFF2"; bold = true; }
+    if (kind === "expense") { fill = "F9FAFB"; }
+    if (kind === "subtotal") { fill = "D9EEF7"; bold = true; }
+    if (kind === "result") { fill = "DDF4D7"; bold = true; fontColor = "166534"; }
+
+    for (let col = 1; col <= 4; col++) {
+      const cell = r.getCell(col);
+      cell.font = { bold, color: { argb: fontColor } };
+      cell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: fill }
+      };
+      cell.alignment = {
+        vertical: "middle",
+        horizontal: col === 1 ? "left" : "right"
+      };
+      cell.border = {
+        top: { style: "thin", color: { argb: "D1D5DB" } },
+        left: { style: "thin", color: { argb: "D1D5DB" } },
+        bottom: { style: "thin", color: { argb: "D1D5DB" } },
+        right: { style: "thin", color: { argb: "D1D5DB" } }
+      };
+    }
+  });
+
+  // =========================
+  // ABA 3 - PREMISSAS
+  // =========================
+  const wsPremissas = wb.addWorksheet("Premissas");
+
+  wsPremissas.columns = [
+    { width: 32 },
+    { width: 18 },
+    { width: 16 }
   ];
 
-  const wsResumo = XLSX.utils.aoa_to_sheet(resumo);
-  wsResumo["!cols"] = [{ wch: 34 }, { wch: 24 }];
-  for (let i = 1; i < resumo.length; i += 1) {
-    const cell = wsResumo[`B${i + 1}`];
-    if (cell && typeof resumo[i][1] === "number") {
-      cell.z = "#,##0.00";
+  wsPremissas.mergeCells("A1:C1");
+  applyTitle(wsPremissas.getCell("A1"), "PREMISSAS DO ESTUDO", "0B5C6B");
+
+  const premissas = [
+    ["Nome do estudo", nomeEstudo, ""],
+    ["Cidade / referência", cidade, ""],
+    ["Área total da gleba", state.study.urban.areaTotal, "m²"],
+    ["APP", state.study.urban.percApp, "%"],
+    ["Área remanescente", state.study.urban.percRem, "%"],
+    ["Área não edificante", state.study.urban.percNaoEd, "%"],
+    ["Áreas institucionais", state.study.urban.percInst, "%"],
+    ["Áreas públicas", state.study.urban.percPubl, "%"],
+    ["Sistema viário", state.study.urban.percViario, "%"],
+    ["Número de lotes", state.study.product.nLotes, "un"],
+    ["Área média do lote", state.study.product.areaMedia, "m²"],
+    ["Preço por m²", state.study.product.precoM2, "R$/m²"],
+    ["Permuta física", state.study.costs.permFisicaPct, "%"],
+    ["Permuta financeira", state.study.costs.permFinPct, "%"],
+    ["Terreno", state.study.costs.terrenoM2, "R$/m²"],
+    ["Infraestrutura", state.study.costs.infraM2, "R$/m²"],
+    ["Projeto e licenciamento", state.study.costs.projetoR, "R$"],
+    ["Registro", state.study.costs.registroR, "R$"],
+    ["Manutenção", state.study.costs.manutPosPct, "%"],
+    ["Marketing", state.study.costs.marketingPct, "%"],
+    ["Corretagem", state.study.costs.corretagemPct, "%"],
+    ["Administração", state.study.costs.adminPct, "%"],
+    ["Impostos vendas", state.study.costs.impostosPct, "%"],
+    ["House comercial", state.study.costs.houseMes, "R$/mês"],
+    ["Corretores", state.study.costs.houseCorretores, "un"],
+    ["Meses", state.study.costs.houseMeses, "meses"],
+    ["Contingências", state.study.costs.contingenciasPct, "%"]
+  ];
+
+  let premRow = 3;
+  premissas.forEach(([label, value, unidade]) => {
+    applyLabel(wsPremissas.getCell(`A${premRow}`));
+    wsPremissas.getCell(`A${premRow}`).value = label;
+
+    const valCell = wsPremissas.getCell(`B${premRow}`);
+    valCell.value = value;
+
+    if (typeof value === "number") {
+      if (String(unidade).includes("R$")) {
+        applyValue(valCell, moneyFmt);
+      } else {
+        applyValue(valCell, numFmt);
+      }
+    } else {
+      applyTextValue(valCell);
     }
-  }
 
-  const wsProforma = XLSX.utils.aoa_to_sheet(proforma);
-  wsProforma["!cols"] = [{ wch: 34 }, { wch: 18 }, { wch: 20 }, { wch: 11 }];
-  for (let i = 1; i < proforma.length; i += 1) {
-    const valueCell = wsProforma[`B${i + 1}`];
-    const perAreaCell = wsProforma[`C${i + 1}`];
-    const pctCell = wsProforma[`D${i + 1}`];
-    if (valueCell) valueCell.z = '"R$" #,##0.00';
-    if (perAreaCell) perAreaCell.z = '"R$" #,##0.00';
-    if (pctCell) {
-      if (typeof pctCell.v === "number") pctCell.v = pctCell.v / 100;
-      pctCell.z = "0.00%";
-    }
-  }
+    applyTextValue(wsPremissas.getCell(`C${premRow}`));
+    wsPremissas.getCell(`C${premRow}`).value = unidade;
 
-  XLSX.utils.book_append_sheet(wb, wsResumo, "Resumo");
-  XLSX.utils.book_append_sheet(wb, wsProforma, "Proforma");
+    premRow++;
+  });
 
-  const nome = safeId(state.study.nomeEstudo || "viabilidade_loteamento");
-  XLSX.writeFile(wb, `${nome}.xlsx`);
+  // =========================
+  // DOWNLOAD
+  // =========================
+  const buffer = await wb.xlsx.writeBuffer();
+  const blob = new Blob(
+    [buffer],
+    { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }
+  );
+
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = `${safeId(nomeEstudo || "viabilidade_loteamento")}.xlsx`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(link.href);
 }
 
 function newStudy() {
