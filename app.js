@@ -1018,7 +1018,7 @@ async function applyStudyFromSheet(index) {
   if (!selected || !selected.studyId) return;
 
   try {
-    const res = await getFromAppsScript("getStudy", { studyId: selected.studyId });
+    const res = await getFromAppsScript("getStudy", { studyId: selected.rowNumber });
     const payload = res.data;
 
     if (!payload || !payload.study) {
