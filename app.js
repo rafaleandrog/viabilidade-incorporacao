@@ -1,4 +1,4 @@
-const APPS_SCRIPT_URL = "https://script.google.com/a/macros/up.bsb.br/s/AKfycbwZ9itEkqLp9QWPn5NK1olS9j9FLrGrIdVpnXIszbDL7Wv_pWL4zxBrMRlUz1MqcHq-pw/exec";
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwZ9itEkqLp9QWPn5NK1olS9j9FLrGrIdVpnXIszbDL7Wv_pWL4zxBrMRlUz1MqcHq-pw/exec";
 const SPREADSHEET_ID = "17zSQ-CdCx9llm1pltkOC8XFXW3hWY751vw6xkl1MYjA";
 const STORAGE_KEYS = {
   benchmarks: "viab_benchmarks_v1",
@@ -838,40 +838,61 @@ async function postToAppsScript(action, payload) {
   if (!APPS_SCRIPT_URL || APPS_SCRIPT_URL.includes("COLE_AQUI")) {
     throw new Error("A URL do Apps Script ainda não foi configurada.");
   }
-  // mode: no-cors evita o erro CORS ao enviar para Apps Script
-  // credentials: include envia os cookies de autenticação do Google Workspace
-  // A resposta fica opaca mas os dados são enviados ao servidor
-  await fetch(APPS_SCRIPT_URL, {
+
+  const response = await fetch(APPS_SCRIPT_URL, {
     method: "POST",
-    mode: "no-cors",
-    credentials: "include",
     headers: { "Content-Type": "text/plain;charset=utf-8" },
     body: JSON.stringify({ action, payload }),
   });
+
   if (!response.ok) {
     throw new Error(`Falha HTTP ${response.status}`);
   }
+
   const raw = await response.text();
-  let parsed = null;
+
+  let parsed;
   try {
     parsed = JSON.parse(raw);
   } catch {
     throw new Error(`Resposta inválida do Apps Script: ${raw.slice(0, 160)}`);
   }
+
   if (!parsed.ok) {
     throw new Error(parsed.message || "Apps Script retornou erro.");
   }
+
   return parsed;
 }
 
-async function getFromAppsScript(action) {
+async function getFromAppsScript(action, params = {}) {
   if (!APPS_SCRIPT_URL || APPS_SCRIPT_URL.includes("COLE_AQUI")) {
     throw new Error("A URL do Apps Script ainda não foi configurada.");
   }
 
-  const url = `${APPS_SCRIPT_URL}?action=${encodeURIComponent(action)}`;
-  const response = await fetch(url, { credentials: "include" });
-  return response.json();
+  const query = new URLSearchParams({ action, ...params }).toString();
+  const url = `${APPS_SCRIPT_URL}?${query}`;
+
+  const response = await fetch(url);
+
+  if (!response.ok) {
+    throw new Error(`Falha HTTP ${response.status}`);
+  }
+
+  const raw = await response.text();
+
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error(`Resposta inválida do Apps Script: ${raw.slice(0, 160)}`);
+  }
+
+  if (!parsed.ok) {
+    throw new Error(parsed.message || "Apps Script retornou erro.");
+  }
+
+  return parsed;
 }
 
 function openBenchmarks() {
@@ -927,76 +948,47 @@ async function loadBenchmarksFromSheet() {
 
 // ─── Google Sheets: leitura de estudos via Visualization API ──────────────────
 
-function parseGvizJSON(text) {
-  const start = text.indexOf("{");
-  const end = text.lastIndexOf("}");
-  if (start === -1 || end === -1) return null;
-  return JSON.parse(text.slice(start, end + 1));
-}
-
-function normalizeStudyRecord(record = {}) {
-  const payload = record.payload_json || {};
-  return {
-    timestamp: record.timestamp || payload.timestamp || "",
-    studyId: record.studyId || (payload.study && payload.study.studyId) || "",
-    nomeEstudo: record.nomeEstudo || (payload.study && payload.study.nomeEstudo) || "Sem nome",
-    cidade: record.cidade || (payload.study && payload.study.cidade) || "",
-    study: payload.study || null,
-  };
-}
-
-async function fetchStudiesFromSheets() {
-  // Google Sheets Visualization API — suporta leitura mesmo em abas não-públicas
-  // quando o usuário está autenticado no Google (credentials: "include").
-  // A planilha precisa estar acessível ao usuário logado.
-  const gvizUrl = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?tqx=out:json&sheet=viabilidade`;
-  const response = await fetch(gvizUrl, { credentials: "include" });
-  if (!response.ok) throw new Error(`Falha ao consultar planilha (${response.status})`);
-  const txt = await response.text();
-  const parsed = parseGvizJSON(txt);
-  const table = parsed && parsed.table;
-  if (!table || !table.cols || !table.rows) return [];
-  const headers = table.cols.map((c) => c.label || c.id || "").filter(Boolean);
-  const studies = table.rows.map((row) => {
-    const obj = {};
-    headers.forEach((h, idx) => {
-      let val = row.c[idx] ? row.c[idx].v : "";
-      if (h === "payload_json" && typeof val === "string") {
-        try { val = JSON.parse(val); } catch {}
-      }
-      obj[h] = val;
-    });
-    return normalizeStudyRecord(obj);
-  }).filter((s) => s.study);
-  return studies.reverse();
-}
-
-function openStudyPicker() {
+async function openStudyPicker() {
   state.showStudyPickerModal = true;
   state.sheetStudies = [];
   state.studySheetMessage = "Carregando estudos da planilha...";
   rerender();
-  fetchStudiesFromSheets()
-    .then((studies) => {
-      state.sheetStudies = studies;
-      state.studySheetMessage = studies.length
-        ? "Selecione um estudo para preencher os campos automaticamente."
-        : "Nenhum estudo encontrado na aba viabilidade. Verifique se a planilha está acessível ao seu usuário Google.";
-      rerender();
-    })
-    .catch((err) => {
-      state.studySheetMessage = `Erro ao carregar estudos: ${err.message}`;
-      rerender();
-    });
+
+  try {
+    const res = await getFromAppsScript("listStudies");
+    state.sheetStudies = res.data || [];
+    state.studySheetMessage = state.sheetStudies.length
+      ? "Selecione um estudo para preencher os campos automaticamente."
+      : "Nenhum estudo encontrado na aba viabilidade.";
+  } catch (err) {
+    state.studySheetMessage = `Erro ao carregar estudos: ${err.message}`;
+  }
+
+  rerender();
 }
 
-function applyStudyFromSheet(index) {
+async function applyStudyFromSheet(index) {
   const selected = state.sheetStudies[index];
-  if (!selected || !selected.study) return;
-  state.study = clone(selected.study);
-  state.sheetMessage = `Estudo "${selected.nomeEstudo}" carregado da planilha.`;
-  state.showStudyPickerModal = false;
-  state.studySheetMessage = "";
+  if (!selected || !selected.studyId) return;
+
+  try {
+    const res = await getFromAppsScript("getStudy", { studyId: selected.studyId });
+    const payload = res.data;
+
+    if (!payload || !payload.study) {
+      throw new Error("O estudo retornado não possui estrutura válida.");
+    }
+
+    state.study = clone(payload.study);
+    state.phase = payload.phase || "estudo_preliminar";
+    state.projectType = payload.projectType || "loteamento";
+    state.sheetMessage = `Estudo "${selected.nomeEstudo}" carregado da planilha.`;
+    state.showStudyPickerModal = false;
+    state.studySheetMessage = "";
+  } catch (err) {
+    state.studySheetMessage = `Erro ao carregar estudo: ${err.message}`;
+  }
+
   rerender();
 }
 
@@ -1042,107 +1034,6 @@ async function sendStudyToSheet() {
     state.sheetMessage = `Erro ao enviar estudo: ${err.message}`;
   }
   rerender();
-}
-
-function parseGvizJSON(text) {
-  const start = text.indexOf("{");
-  const end = text.lastIndexOf("}");
-  if (start === -1 || end === -1) return null;
-  return JSON.parse(text.slice(start, end + 1));
-}
-
-function normalizeStudyRecord(record = {}) {
-  const payload = record.payload_json || {};
-  return {
-    timestamp: record.timestamp || payload.timestamp || "",
-    studyId: record.studyId || (payload.study && payload.study.studyId) || "",
-    nomeEstudo: record.nomeEstudo || (payload.study && payload.study.nomeEstudo) || "Sem nome",
-    cidade: record.cidade || (payload.study && payload.study.cidade) || "",
-    study: payload.study || null,
-  };
-}
-
-async function fetchStudiesFromSheets() {
-  const gvizUrl = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?tqx=out:json&sheet=viabilidade`;
-  const response = await fetch(gvizUrl);
-  if (!response.ok) throw new Error(`Falha ao consultar planilha (${response.status})`);
-  const txt = await response.text();
-  const parsed = parseGvizJSON(txt);
-  const table = parsed && parsed.table;
-  if (!table || !table.cols || !table.rows) return [];
-  const headers = table.cols.map((c) => c.label || c.id || "").filter(Boolean);
-  const studies = table.rows.map((row) => {
-    const obj = {};
-    headers.forEach((h, idx) => {
-      let val = row.c[idx] ? row.c[idx].v : "";
-      if (h === "payload_json" && typeof val === "string") {
-        try { val = JSON.parse(val); } catch {}
-      }
-      obj[h] = val;
-    });
-    return normalizeStudyRecord(obj);
-  }).filter((s) => s.study);
-  return studies.reverse();
-}
-
-function openStudyPicker() {
-  state.showStudyPickerModal = true;
-  state.sheetStudies = [];
-  state.studySheetMessage = "Carregando estudos da planilha...";
-  rerender();
-  fetchStudiesFromSheets()
-    .then((studies) => {
-      state.sheetStudies = studies;
-      state.studySheetMessage = studies.length
-        ? "Selecione um estudo para preencher os campos automaticamente."
-        : "Nenhum estudo encontrado na aba viabilidade.";
-      rerender();
-    })
-    .catch((err) => {
-      state.studySheetMessage = `Erro ao carregar estudos: ${err.message}`;
-      rerender();
-    });
-}
-
-function applyStudyFromSheet(index) {
-  const selected = state.sheetStudies[index];
-  if (!selected || !selected.study) return;
-  state.study = clone(selected.study);
-  state.sheetMessage = `Estudo "${selected.nomeEstudo}" carregado da planilha.`;
-  state.showStudyPickerModal = false;
-  state.studySheetMessage = "";
-  rerender();
-}
-
-function studyPickerModal() {
-  return `
-    <div class="modal-overlay" onclick="closeStudyPicker(event)">
-      <div class="modal study-modal" onclick="event.stopPropagation()">
-        <h3>Estudos salvos na planilha</h3>
-        <p>${state.studySheetMessage || "Selecione um estudo para preencher o formulário."}</p>
-        <div class="study-list">
-          ${state.sheetStudies.map((s, idx) => `
-            <button class="study-item" onclick="applyStudyFromSheet(${idx})">
-              <strong>${s.nomeEstudo || "Sem nome"}</strong>
-              <span>${s.cidade || "Sem cidade"} · ${s.studyId || "Sem ID"} · ${s.timestamp ? new Date(s.timestamp).toLocaleString("pt-BR") : "-"}</span>
-            </button>
-          `).join("") || `<div class="muted">Sem estudos para listar.</div>`}
-        </div>
-        <div class="spacer"></div>
-        <div class="footer-actions">
-          <button class="btn gray" onclick="closeStudyPicker()">Fechar</button>
-        </div>
-      </div>
-    </div>
-  `;
-}
-
-function closeStudyPicker(e) {
-  if (!e || (e.target && e.target.classList && e.target.classList.contains("modal-overlay"))) {
-    state.showStudyPickerModal = false;
-    state.studySheetMessage = "";
-    rerender();
-  }
 }
 
 function saveScenario() {
