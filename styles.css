@@ -632,3 +632,122 @@ input[type=number]{-moz-appearance:textfield}
   .form-row{grid-template-columns:1fr}
   .input-wrap{max-width:100%}
 }
+
+/* ── Mode toggle (infra / projetos / licenciamento) ── */
+.label-with-mode{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  margin-bottom:4px;
+}
+.field label.label-with-mode{margin-bottom:4px}
+.mode-toggle{display:flex;gap:2px}
+.mode-btn{
+  font-size:9px;
+  padding:2px 7px;
+  border-radius:6px;
+  border:1px solid var(--border);
+  background:#fff;
+  cursor:pointer;
+  color:var(--muted);
+  line-height:1.6;
+}
+.mode-btn.active{
+  background:var(--primary);
+  color:#fff;
+  border-color:var(--primary);
+}
+
+/* ── Permuta financeira checkboxes ── */
+.perm-fin-opts{
+  margin-top:12px;
+  padding:12px 14px;
+  background:#f5f9fb;
+  border-radius:10px;
+  border:1px solid var(--border);
+}
+.hint{
+  font-size:12px;
+  color:var(--muted);
+  margin-bottom:8px;
+}
+.checkbox-group{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px 22px;
+}
+.checkbox-label{
+  display:flex;
+  align-items:center;
+  gap:6px;
+  font-size:13px;
+  cursor:pointer;
+  user-select:none;
+}
+.checkbox-label input[type=checkbox]{
+  width:15px;
+  height:15px;
+  cursor:pointer;
+  accent-color:var(--primary);
+}
+
+/* ── Feedback FAB & modal ── */
+.fab-feedback{
+  position:fixed;
+  bottom:24px;
+  right:24px;
+  z-index:1000;
+  width:50px;
+  height:50px;
+  border-radius:50%;
+  background:var(--primary);
+  color:#fff;
+  font-size:22px;
+  border:none;
+  cursor:pointer;
+  box-shadow:0 4px 18px rgba(0,0,0,.22);
+  transition:transform .15s,box-shadow .15s;
+}
+.fab-feedback:hover{
+  transform:scale(1.09);
+  box-shadow:0 6px 24px rgba(0,0,0,.28);
+}
+.feedback-modal{width:min(560px,94vw)}
+.feedback-types{
+  display:flex;
+  gap:10px;
+}
+.type-option{
+  flex:1;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:8px;
+  padding:10px 12px;
+  border-radius:10px;
+  border:2px solid var(--border);
+  cursor:pointer;
+  font-size:13px;
+  font-weight:600;
+  transition:border-color .15s,background .15s;
+}
+.type-option input[type=radio]{display:none}
+.type-option.active{
+  border-color:var(--primary);
+  background:#eef6f9;
+  color:var(--primary);
+}
+.feedback-text{
+  width:100%;
+  box-sizing:border-box;
+  border:1px solid var(--border);
+  border-radius:10px;
+  padding:10px 12px;
+  font-family:'Plus Jakarta Sans',sans-serif;
+  font-size:13px;
+  resize:vertical;
+  outline:none;
+}
+.feedback-text:focus{border-color:#7ab0c0}
+.notice-ok{background:#e6f9f0;color:#1a7a4a;border:1px solid #b3e8cc}
+.notice-err{background:#fef2f2;color:#b91c1c;border:1px solid #fecaca}
