@@ -66,6 +66,10 @@ const state = {
   studySheetMessage: "",
   showStudyPickerModal: false,
   sheetStudies: [],
+  showFeedbackModal: false,
+  feedbackType: "sugestao",
+  feedbackText: "",
+  feedbackMessage: "",
   study: {
     studyId: "",
     nomeEstudo: "",
@@ -85,8 +89,15 @@ const state = {
       precoM2: 0,
     },
     costs: {
+      infraMode: "m2",
       infraM2: 0,
+      infraPct: 0,
+      projetoMode: "R$",
       projetoR: 0,
+      projetoPct: 0,
+      licenciamentoMode: "R$",
+      licenciamentoR: 0,
+      licenciamentoPct: 0,
       registroR: 0,
       manutPosPct: 2,
       marketingPct: 0,
@@ -95,11 +106,12 @@ const state = {
       impostosPct: 0,
       permFisicaPct: 0,
       permFinPct: 0,
+      permFinExcImpostos: false,
+      permFinExcCorretagem: false,
+      permFinExcMarketing: false,
+      permFinExcAdmin: false,
       contingenciasPct: 0,
       terrenoM2: 0,
-      houseMes: 0,
-      houseCorretores: 6,
-      houseMeses: 6,
     },
   },
   calc: null,
@@ -275,28 +287,41 @@ function compute(study) {
 
   const permutaFisicaR = areaPermutaFis * precoM2;
 
+  // Deduções comerciais antes da receita líquida
   const impostosR = vgvBruto * num(c.impostosPct) / 100;
   const corretagemR = vgvBruto * num(c.corretagemPct) / 100;
   const marketingR = vgvBruto * num(c.marketingPct) / 100;
-  const houseR = num(c.houseMes) * num(c.houseCorretores) * num(c.houseMeses);
 
-  const receitaLiquida = vgvBruto - impostosR - corretagemR - marketingR - houseR;
+  const receitaLiquida = vgvBruto - impostosR - corretagemR - marketingR;
 
   const terrenoR = num(c.terrenoM2) * areaTotal;
-  const infraR = num(c.infraM2) * areaLoteavel;
-  const projetoR = num(c.projetoR);
+  const infraR = c.infraMode === "pct"
+    ? vgvBruto * num(c.infraPct) / 100
+    : num(c.infraM2) * areaLoteavel;
+  const projetoFinalR = c.projetoMode === "pct"
+    ? vgvBruto * num(c.projetoPct) / 100
+    : num(c.projetoR);
+  const licenciamentoFinalR = c.licenciamentoMode === "pct"
+    ? vgvBruto * num(c.licenciamentoPct) / 100
+    : num(c.licenciamentoR);
   const registroR = num(c.registroR);
   const manutPosR = infraR * num(c.manutPosPct) / 100;
 
-  const custoObrasTotal = infraR + projetoR + registroR + manutPosR;
+  const custoObrasTotal = infraR + projetoFinalR + licenciamentoFinalR + registroR + manutPosR;
   const resultadoOperacional = receitaLiquida - terrenoR - custoObrasTotal;
 
-  const permFinR = vgvBruto * num(c.permFinPct) / 100;
-  const contingenciasR = custoObrasTotal * num(c.contingenciasPct) / 100;
+  // Após resultado operacional: admin, permuta financeira (base ajustável), contingências
   const adminR = vgvBruto * num(c.adminPct) / 100;
+  let permFinBase = vgvBruto;
+  if (c.permFinExcImpostos)   permFinBase -= impostosR;
+  if (c.permFinExcCorretagem) permFinBase -= corretagemR;
+  if (c.permFinExcMarketing)  permFinBase -= marketingR;
+  if (c.permFinExcAdmin)      permFinBase -= adminR;
+  const permFinR = Math.max(0, permFinBase) * num(c.permFinPct) / 100;
+  const contingenciasR = custoObrasTotal * num(c.contingenciasPct) / 100;
   const resultadoFinal = resultadoOperacional - permFinR - contingenciasR - adminR;
 
-  const custoTotal = terrenoR + custoObrasTotal + impostosR + adminR + corretagemR + marketingR + houseR + permFinR + contingenciasR;
+  const custoTotal = terrenoR + custoObrasTotal + impostosR + adminR + corretagemR + marketingR + permFinR + contingenciasR;
   const custoM2Lotes = areaTotalLotes ? custoObrasTotal / areaTotalLotes : 0;
   const relPrecoCusto = custoM2Lotes ? precoM2 / custoM2Lotes : 0;
   const lotesPossiveis = areaMedia ? Math.floor(areaLotesVend / areaMedia) : 0;
@@ -328,11 +353,11 @@ function compute(study) {
     impostosR,
     corretagemR,
     marketingR,
-    houseR,
     receitaLiquida,
     terrenoR,
     infraR,
-    projetoR,
+    projetoFinalR,
+    licenciamentoFinalR,
     registroR,
     manutPosR,
     custoObrasTotal,
@@ -391,6 +416,35 @@ function inputField(label, path, value, opts = {}) {
           value="${displayVal}"
           data-path="${path}" />
         ${suffix ? `<span class="affix">${suffix}</span>` : ""}
+      </div>
+    </div>
+  `;
+}
+
+// modeField: campo com mini-toggle para escolher modo de entrada
+// modes = [{id, label}]  fieldsByMode = { modeId: { path, value, prefix?, suffix? } }
+function modeField(label, modePath, modes, fieldsByMode) {
+  const currentMode = getNestedValue(modePath) || modes[0].id;
+  const f = fieldsByMode[currentMode];
+  const toggleHtml = modes.map(m =>
+    `<button type="button" class="mode-btn${currentMode === m.id ? " active" : ""}"
+      onclick="setNested('${modePath}','${m.id}')">${m.label}</button>`
+  ).join("");
+  const isPercentField = (f.suffix || "").includes("%");
+  const displayVal = _activePath === f.path
+    ? _activeRaw
+    : (isPercentField ? fmt(f.value, 2) : fmtBR(f.value));
+  return `
+    <div class="field">
+      <label class="label-with-mode">
+        <span>${label}</span>
+        <span class="mode-toggle">${toggleHtml}</span>
+      </label>
+      <div class="input-wrap full">
+        ${f.prefix ? `<span class="affix left">${f.prefix}</span>` : ""}
+        <input class="inp" type="text" inputmode="decimal"
+          value="${displayVal}" data-path="${f.path}" />
+        ${f.suffix ? `<span class="affix">${f.suffix}</span>` : ""}
       </div>
     </div>
   `;
@@ -610,27 +664,54 @@ function loteamentoView() {
               ${inputField("Permuta financeira", "costs.permFinPct", state.study.costs.permFinPct, { suffix: "%", full: true })}
               ${inputField("Terreno", "costs.terrenoM2", state.study.costs.terrenoM2, { prefix: "R$", suffix: "/m²total", full: true })}
             </div>
+            ${state.study.costs.permFinPct > 0 ? `
+              <div class="perm-fin-opts">
+                <p class="hint">Base da permuta financeira — excluir do cálculo:</p>
+                <div class="checkbox-group">
+                  <label class="checkbox-label"><input type="checkbox" ${state.study.costs.permFinExcImpostos ? "checked" : ""} onchange="setNested('costs.permFinExcImpostos',this.checked)"> Impostos sobre vendas</label>
+                  <label class="checkbox-label"><input type="checkbox" ${state.study.costs.permFinExcCorretagem ? "checked" : ""} onchange="setNested('costs.permFinExcCorretagem',this.checked)"> Corretagem</label>
+                  <label class="checkbox-label"><input type="checkbox" ${state.study.costs.permFinExcMarketing ? "checked" : ""} onchange="setNested('costs.permFinExcMarketing',this.checked)"> Marketing / publicidade</label>
+                  <label class="checkbox-label"><input type="checkbox" ${state.study.costs.permFinExcAdmin ? "checked" : ""} onchange="setNested('costs.permFinExcAdmin',this.checked)"> Gestão de carteira (admin)</label>
+                </div>
+              </div>
+            ` : ""}
           </div>
         </div>
 
         <div class="section" style="margin-top:12px">
           <div class="section-head head-orange">4. Estrutura de custos</div>
           <div class="section-body">
-            <div style="display:grid;grid-template-columns:1.25fr 1fr 1fr .65fr .65fr .65fr;gap:14px;margin-bottom:14px">
-              ${inputField("Infraestrutura", "costs.infraM2", state.study.costs.infraM2, { prefix: "R$", suffix: "/m²lot.", full: true })}
-              ${inputField("Projeto e licenciamento", "costs.projetoR", state.study.costs.projetoR, { prefix: "R$", full: true })}
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr .7fr .7fr .7fr;gap:14px;margin-bottom:14px">
+              ${modeField("Infraestrutura", "costs.infraMode",
+                [{id:"m2", label:"R$/m²lot."}, {id:"pct", label:"% VGV"}],
+                {
+                  m2:  { path:"costs.infraM2",  value: state.study.costs.infraM2,  prefix:"R$", suffix:"/m²lot." },
+                  pct: { path:"costs.infraPct",  value: state.study.costs.infraPct,  suffix:"%VGV" }
+                }
+              )}
+              ${modeField("Projetos", "costs.projetoMode",
+                [{id:"R$", label:"R$"}, {id:"pct", label:"% VGV"}],
+                {
+                  "R$": { path:"costs.projetoR",   value: state.study.costs.projetoR,   prefix:"R$" },
+                  pct:  { path:"costs.projetoPct",  value: state.study.costs.projetoPct,  suffix:"%VGV" }
+                }
+              )}
+              ${modeField("Licenciamento", "costs.licenciamentoMode",
+                [{id:"R$", label:"R$"}, {id:"pct", label:"% VGV"}],
+                {
+                  "R$": { path:"costs.licenciamentoR",   value: state.study.costs.licenciamentoR,   prefix:"R$" },
+                  pct:  { path:"costs.licenciamentoPct",  value: state.study.costs.licenciamentoPct,  suffix:"%VGV" }
+                }
+              )}
               ${inputField("Registro", "costs.registroR", state.study.costs.registroR, { prefix: "R$", full: true })}
               ${inputField("Manutenção", "costs.manutPosPct", state.study.costs.manutPosPct, { suffix: "%infra", full: true })}
+              ${inputField("Contingências", "costs.contingenciasPct", state.study.costs.contingenciasPct, { suffix: "%obras", full: true })}
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:14px">
               ${inputField("Marketing", "costs.marketingPct", state.study.costs.marketingPct, { suffix: "%VGV", full: true })}
               ${inputField("Corretagem", "costs.corretagemPct", state.study.costs.corretagemPct, { suffix: "%VGV", full: true })}
-            </div>
-            <div style="display:grid;grid-template-columns:.65fr .65fr 1fr .65fr .65fr .65fr;gap:14px">
               ${inputField("Administração", "costs.adminPct", state.study.costs.adminPct, { suffix: "%VGV", full: true })}
               ${inputField("Impostos vendas", "costs.impostosPct", state.study.costs.impostosPct, { suffix: "%VGV", full: true })}
-              ${inputField("House comercial", "costs.houseMes", state.study.costs.houseMes, { prefix: "R$", suffix: "/mês", full: true })}
-              ${inputField("Corretores", "costs.houseCorretores", state.study.costs.houseCorretores, { full: true })}
-              ${inputField("Meses", "costs.houseMeses", state.study.costs.houseMeses, { full: true })}
-              ${inputField("Contingências", "costs.contingenciasPct", state.study.costs.contingenciasPct, { suffix: "%obras", full: true })}
             </div>
           </div>
         </div>
@@ -658,11 +739,11 @@ function loteamentoView() {
                     ${proformaRow("(-) Impostos sobre vendas", -c.impostosR, pctOf(c.impostosR, c.vgvBruto), "row-expense")}
                     ${proformaRow("(-) Corretagem", -c.corretagemR, pctOf(c.corretagemR, c.vgvBruto), "row-expense")}
                     ${proformaRow("(-) Marketing e vendas", -c.marketingR, pctOf(c.marketingR, c.vgvBruto), "row-expense")}
-                    ${proformaRow("(-) House comercial", -c.houseR, pctOf(c.houseR, c.vgvBruto), "row-expense")}
                     ${proformaRow("= Receita líquida", c.receitaLiquida, c.margemLiquidaPct, "row-sub")}
                     ${proformaRow("(-) Pagamento do terreno", -c.terrenoR, pctOf(c.terrenoR, c.vgvBruto), "row-expense")}
                     ${proformaRow("(-) Infraestrutura", -c.infraR, pctOf(c.infraR, c.vgvBruto), "row-expense")}
-                    ${proformaRow("(-) Projeto e licenciamento", -c.projetoR, pctOf(c.projetoR, c.vgvBruto), "row-expense")}
+                    ${proformaRow("(-) Projetos", -c.projetoFinalR, pctOf(c.projetoFinalR, c.vgvBruto), "row-expense")}
+                    ${proformaRow("(-) Licenciamento", -c.licenciamentoFinalR, pctOf(c.licenciamentoFinalR, c.vgvBruto), "row-expense")}
                     ${proformaRow("(-) Registro", -c.registroR, pctOf(c.registroR, c.vgvBruto), "row-expense")}
                     ${proformaRow("(-) Manutenção pós-obra", -c.manutPosR, pctOf(c.manutPosR, c.vgvBruto), "row-expense")}
                     ${proformaRow("= Resultado operacional", c.resultadoOperacional, c.margemOperacionalPct, "row-sub")}
@@ -1070,6 +1151,83 @@ function closeStudyPicker(e) {
   }
 }
 
+// ─── Feedback ────────────────────────────────────────────────────────────────
+
+function openFeedback() {
+  state.showFeedbackModal = true;
+  state.feedbackMessage = "";
+  rerender();
+}
+
+function closeFeedback(e) {
+  if (!e || (e.target && e.target.classList && e.target.classList.contains("modal-overlay"))) {
+    state.showFeedbackModal = false;
+    state.feedbackMessage = "";
+    rerender();
+  }
+}
+
+async function submitFeedback() {
+  if (!state.feedbackText.trim()) {
+    state.feedbackMessage = "Por favor, descreva seu feedback antes de enviar.";
+    rerender();
+    return;
+  }
+  try {
+    await postToAppsScript("saveFeedback", {
+      timestamp: new Date().toISOString(),
+      tipo: state.feedbackType,
+      texto: state.feedbackText.trim(),
+      studyId: state.study.studyId || "",
+      projectType: state.projectType || "",
+    });
+    state.feedbackMessage = "Feedback enviado com sucesso. Obrigado!";
+    state.feedbackText = "";
+  } catch (err) {
+    state.feedbackMessage = `Erro ao enviar feedback: ${err.message}`;
+  }
+  rerender();
+}
+
+function feedbackModal() {
+  const tipos = [
+    { id: "sugestao", label: "Sugestão" },
+    { id: "erro",     label: "Erro" },
+    { id: "duvida",   label: "Dúvida" },
+  ];
+  return `
+    <div class="modal-overlay" onclick="closeFeedback(event)">
+      <div class="modal feedback-modal" onclick="event.stopPropagation()">
+        <h3>Enviar feedback</h3>
+        <p>Nos conte sua sugestão, reporte um erro ou tire uma dúvida sobre o sistema.</p>
+        ${state.feedbackMessage ? `<div class="notice ${state.feedbackMessage.includes("sucesso") ? "notice-ok" : "notice-err"}">${state.feedbackMessage}</div><div class="spacer"></div>` : ""}
+        <div class="feedback-types">
+          ${tipos.map(t => `
+            <label class="type-option${state.feedbackType === t.id ? " active" : ""}">
+              <input type="radio" name="feedbackType" value="${t.id}"
+                ${state.feedbackType === t.id ? "checked" : ""}
+                onchange="state.feedbackType='${t.id}';rerender()">
+              ${t.label}
+            </label>
+          `).join("")}
+        </div>
+        <div class="spacer"></div>
+        <textarea class="feedback-text" rows="5" placeholder="Descreva aqui..."
+          oninput="state.feedbackText=this.value">${state.feedbackText}</textarea>
+        <div class="spacer"></div>
+        <div class="footer-actions">
+          <div class="btn-row">
+            <button class="btn orange" onclick="submitFeedback()">Enviar</button>
+            <button class="btn gray" onclick="closeFeedback()">Fechar</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+// ─── Google Sheets: envio de estudo ──────────────────────────────────────────
+
 async function sendStudyToSheet() {
   try {
     const payload = buildPayload().payload;
@@ -1369,26 +1527,21 @@ async function exportExcel() {
   });
 
   const proformaRows = [
-    [`VGV Potencial (${fmt(c.areaTotalLotes, 0)} m²)`, c.vgvPotencial, c.areaLiquidaVenda ? c.vgvPotencial / c.areaLiquidaVenda : 0, c.vgvPotencialPctSobreBruto / 100, "header"],
-    ...(c.permutaFisicaR > 0
-      ? [[`(-) Permuta física (${fmt(c.areaPermutaFis, 0)} m²)`, -c.permutaFisicaR, c.areaLiquidaVenda ? -c.permutaFisicaR / c.areaLiquidaVenda : 0, c.permutaFisicaPctSobreBruto / 100, "deduct"]]
-      : []),
-    ["Receita bruta (VGV)", c.vgvBruto, c.areaLiquidaVenda ? c.vgvBruto / c.areaLiquidaVenda : 0, 1, "main"],
-    ["(-) Impostos sobre vendas", -c.impostosR, c.areaLiquidaVenda ? -c.impostosR / c.areaLiquidaVenda : 0, pctOf(c.impostosR, c.vgvBruto) / 100, "expense"],
-    ["(-) Corretagem", -c.corretagemR, c.areaLiquidaVenda ? -c.corretagemR / c.areaLiquidaVenda : 0, pctOf(c.corretagemR, c.vgvBruto) / 100, "expense"],
-    ["(-) Marketing e vendas", -c.marketingR, c.areaLiquidaVenda ? -c.marketingR / c.areaLiquidaVenda : 0, pctOf(c.marketingR, c.vgvBruto) / 100, "expense"],
-    ["(-) House comercial", -c.houseR, c.areaLiquidaVenda ? -c.houseR / c.areaLiquidaVenda : 0, pctOf(c.houseR, c.vgvBruto) / 100, "expense"],
-    ["= Receita líquida", c.receitaLiquida, c.areaLiquidaVenda ? c.receitaLiquida / c.areaLiquidaVenda : 0, c.margemLiquidaPct / 100, "subtotal"],
-    ["(-) Pagamento do terreno", -c.terrenoR, c.areaLiquidaVenda ? -c.terrenoR / c.areaLiquidaVenda : 0, pctOf(c.terrenoR, c.vgvBruto) / 100, "expense"],
-    ["(-) Infraestrutura", -c.infraR, c.areaLiquidaVenda ? -c.infraR / c.areaLiquidaVenda : 0, pctOf(c.infraR, c.vgvBruto) / 100, "expense"],
-    ["(-) Projeto e licenciamento", -c.projetoR, c.areaLiquidaVenda ? -c.projetoR / c.areaLiquidaVenda : 0, pctOf(c.projetoR, c.vgvBruto) / 100, "expense"],
-    ["(-) Registro", -c.registroR, c.areaLiquidaVenda ? -c.registroR / c.areaLiquidaVenda : 0, pctOf(c.registroR, c.vgvBruto) / 100, "expense"],
-    ["(-) Manutenção pós-obra", -c.manutPosR, c.areaLiquidaVenda ? -c.manutPosR / c.areaLiquidaVenda : 0, pctOf(c.manutPosR, c.vgvBruto) / 100, "expense"],
-    ["= Resultado operacional", c.resultadoOperacional, c.areaLiquidaVenda ? c.resultadoOperacional / c.areaLiquidaVenda : 0, c.margemOperacionalPct / 100, "subtotal"],
-    ["(-) Permuta financeira", -c.permFinR, c.areaLiquidaVenda ? -c.permFinR / c.areaLiquidaVenda : 0, pctOf(c.permFinR, c.vgvBruto) / 100, "expense"],
-    ["(-) Contingências", -c.contingenciasR, c.areaLiquidaVenda ? -c.contingenciasR / c.areaLiquidaVenda : 0, pctOf(c.contingenciasR, c.vgvBruto) / 100, "expense"],
-    ["(-) Administração e gestão", -c.adminR, c.areaLiquidaVenda ? -c.adminR / c.areaLiquidaVenda : 0, pctOf(c.adminR, c.vgvBruto) / 100, "expense"],
-    ["= Resultado final", c.resultadoFinal, c.areaLiquidaVenda ? c.resultadoFinal / c.areaLiquidaVenda : 0, c.margemFinalPct / 100, "result"]
+    ["Receita bruta (VGV)", c.vgvBruto, 100],
+    ["Corretagem", -c.corretagemR, pctOf(c.corretagemR, c.vgvBruto)],
+    ["Marketing e vendas", -c.marketingR, pctOf(c.marketingR, c.vgvBruto)],
+    ["Receita líquida", c.receitaLiquida, c.margemLiquidaPct],
+    ["Pagamento do terreno", -c.terrenoR, pctOf(c.terrenoR, c.vgvBruto)],
+    ["Custo obras total", -c.custoObrasTotal, c.custoObrasPct],
+    ["Infraestrutura", -c.infraR, pctOf(c.infraR, c.vgvBruto)],
+    ["Projetos", -c.projetoFinalR, pctOf(c.projetoFinalR, c.vgvBruto)],
+    ["Licenciamento", -c.licenciamentoFinalR, pctOf(c.licenciamentoFinalR, c.vgvBruto)],
+    ["Registro", -c.registroR, pctOf(c.registroR, c.vgvBruto)],
+    ["Manutenção pós-obra", -c.manutPosR, pctOf(c.manutPosR, c.vgvBruto)],
+    ["Resultado operacional", c.resultadoOperacional, c.margemOperacionalPct],
+    ["Impostos sobre vendas", -c.impostosR, pctOf(c.impostosR, c.vgvBruto)],
+    ["Administração e gestão", -c.adminR, pctOf(c.adminR, c.vgvBruto)],
+    ["Resultado final", c.resultadoFinal, c.margemFinalPct],
   ];
 
   let proformaStart = 5;
@@ -1522,7 +1675,50 @@ async function exportExcel() {
 }
 
 function newStudy() {
-  state.study = getDefaultStudy();
+  state.study = {
+    studyId: "EST-001",
+    nomeEstudo: "",
+    cidade: "",
+    urban: {
+      areaTotal: 0,
+      percApp: 0,
+      percRem: 0,
+      percNaoEd: 0,
+      percInst: 5,
+      percPubl: 15,
+      percViario: 30,
+    },
+    product: {
+      nLotes: 0,
+      areaMedia: 0,
+      precoM2: 0,
+    },
+    costs: {
+      infraMode: "m2",
+      infraM2: 0,
+      infraPct: 0,
+      projetoMode: "R$",
+      projetoR: 0,
+      projetoPct: 0,
+      licenciamentoMode: "R$",
+      licenciamentoR: 0,
+      licenciamentoPct: 0,
+      registroR: 0,
+      manutPosPct: 2,
+      marketingPct: 0,
+      corretagemPct: 0,
+      adminPct: 0,
+      impostosPct: 0,
+      permFisicaPct: 0,
+      permFinPct: 0,
+      permFinExcImpostos: false,
+      permFinExcCorretagem: false,
+      permFinExcMarketing: false,
+      permFinExcAdmin: false,
+      contingenciasPct: 0,
+      terrenoM2: 0,
+    },
+  };
   state.sheetMessage = "Novo estudo iniciado.";
   rerender();
 }
@@ -1536,11 +1732,21 @@ function startProject(type) {
   rerender();
 }
 
+function globalOverlays() {
+  return `
+    <button class="fab-feedback" onclick="openFeedback()" title="Enviar feedback">💬</button>
+    ${state.showFeedbackModal ? feedbackModal() : ""}
+  `;
+}
+
 function render() {
-  if (state.view === "home") return homeView();
-  if (state.view === "projectType") return projectTypeView();
-  if (state.view === "loteamento") return loteamentoView();
-  return homeView();
+  const view = (() => {
+    if (state.view === "home") return homeView();
+    if (state.view === "projectType") return projectTypeView();
+    if (state.view === "loteamento") return loteamentoView();
+    return homeView();
+  })();
+  return view + globalOverlays();
 }
 
 function attachEvents() {
@@ -1642,6 +1848,9 @@ function bootApp() {
   window.openStudyPicker = openStudyPicker;
   window.closeStudyPicker = closeStudyPicker;
   window.applyStudyFromSheet = applyStudyFromSheet;
+  window.openFeedback = openFeedback;
+  window.closeFeedback = closeFeedback;
+  window.submitFeedback = submitFeedback;
 
   try {
     rerender();
