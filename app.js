@@ -980,10 +980,13 @@ async function postToAppsScript(action, payload) {
   if (!APPS_SCRIPT_URL || APPS_SCRIPT_URL.includes("COLE_AQUI")) {
     throw new Error("A URL do Apps Script ainda não foi configurada.");
   }
-
+  // mode: no-cors evita o erro CORS ao enviar para Apps Script
+  // credentials: include envia os cookies de autenticação do Google Workspace
+  // A resposta é opaca (no-cors) — não é possível ler o corpo ou o status
   await fetch(APPS_SCRIPT_URL, {
     method: "POST",
     mode: "no-cors",
+    credentials: "include",
     headers: { "Content-Type": "text/plain;charset=utf-8" },
     body: JSON.stringify({ action, payload }),
   });
@@ -1002,7 +1005,7 @@ async function getFromAppsScript(action, params = {}) {
   const query = new URLSearchParams({ action, ...params }).toString();
   const url = `${APPS_SCRIPT_URL}?${query}`;
 
-  const response = await fetch(url);
+  const response = await fetch(url, { credentials: "include" });
 
   if (!response.ok) {
     throw new Error(`Falha HTTP ${response.status}`);
