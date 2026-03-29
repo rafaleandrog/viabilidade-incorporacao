@@ -813,3 +813,80 @@ input[type=number]{-moz-appearance:textfield}
   font-size:22px;
   border:none;
 }
+
+/* Terreno cards grid (Notion/Softr style) */
+.terreno-cards-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(220px,1fr));
+  gap:16px;
+}
+.terreno-card{
+  background:#fff;
+  border:1px solid var(--border);
+  border-radius:14px;
+  overflow:hidden;
+  position:relative;
+  box-shadow:0 2px 10px rgba(6,75,89,.07);
+}
+.terreno-card-img img{
+  width:100%;
+  height:150px;
+  object-fit:cover;
+  display:block;
+}
+.terreno-card-no-img{
+  width:100%;
+  height:150px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:40px;
+  background:#eef4f7;
+}
+.terreno-card-body{
+  padding:12px 14px;
+}
+.terreno-card-title{
+  font-size:14px;
+  font-weight:700;
+  color:var(--text);
+  margin-bottom:4px;
+}
+.terreno-card-sub{
+  font-size:12px;
+  color:var(--muted);
+  margin-bottom:8px;
+}
+.terreno-card-meta{
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px;
+  font-size:11px;
+  color:var(--primary);
+  font-weight:600;
+}
+.terreno-card-del{
+  position:absolute;
+  top:8px;
+  right:8px;
+  background:rgba(0,0,0,.4);
+  color:#fff;
+  border:none;
+  border-radius:50%;
+  width:22px;
+  height:22px;
+  font-size:11px;
+  cursor:pointer;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  line-height:1;
+}
+.terreno-card-del:hover{background:rgba(0,0,0,.65);}
+.terreno-card-map{
+  height:160px;
+  margin-top:8px;
+  border-radius:8px;
+  overflow:hidden;
+  border:1px solid var(--border);
+}
