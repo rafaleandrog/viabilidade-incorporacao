@@ -106,10 +106,10 @@ const state = {
       impostosPct: 0,
       permFisicaPct: 0,
       permFinPct: 0,
-      permFinExcImpostos: false,
-      permFinExcCorretagem: false,
+      permFinExcImpostos: true,
+      permFinExcCorretagem: true,
       permFinExcMarketing: false,
-      permFinExcAdmin: false,
+      permFinExcAdmin: true,
       contingenciasPct: 0,
       terrenoM2: 0,
     },
@@ -177,9 +177,8 @@ let _activeRaw = "";
 
 function fmtBR(v) {
   const n = Number(v || 0);
-  if (n === 0) return "";
   return n.toLocaleString("pt-BR", {
-    minimumFractionDigits: 0,
+    minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   });
 }
@@ -232,10 +231,10 @@ function getDefaultStudy() {
       impostosPct: 0,
       permFisicaPct: 0,
       permFinPct: 0,
-      permFinExcImpostos: false,
-      permFinExcCorretagem: false,
+      permFinExcImpostos: true,
+      permFinExcCorretagem: true,
       permFinExcMarketing: false,
-      permFinExcAdmin: false,
+      permFinExcAdmin: true,
       contingenciasPct: 0,
       terrenoM2: 0,
     },
@@ -462,6 +461,18 @@ function modeField(label, modePath, modes, fieldsByMode) {
   `;
 }
 
+function calcDisplay(label, value, sub = "") {
+  return `
+    <div class="field">
+      <label>${label}</label>
+      <div class="calc-display">
+        <span class="calc-value">${value}</span>
+        ${sub ? `<span class="calc-sub">${sub}</span>` : ""}
+      </div>
+    </div>
+  `;
+}
+
 function benchmarkInput(label, type, group, key, value) {
   return `
     <div class="field">
@@ -574,7 +585,7 @@ function loteamentoView() {
         <div class="btn-row">
           <button class="btn gray" onclick="newStudy()">Novo estudo</button>
           <button class="btn blue" onclick="openStudyPicker()">Buscar estudos salvos</button>
-          <button class="btn primary" onclick="openTerrenoPicker()">📍 Selecionar terreno</button>
+          <button class="btn blue" onclick="openTerrenoPicker()">📍 Selecionar terreno</button>
         </div>
       </div>
 
@@ -682,13 +693,21 @@ function loteamentoView() {
               ${inputField("Permuta financeira", "costs.permFinPct", state.study.costs.permFinPct, { suffix: "%", full: true })}
               ${inputField("Terreno", "costs.terrenoM2", state.study.costs.terrenoM2, { prefix: "R$", suffix: "/m²total", full: true })}
             </div>
+            <div style="display:grid;grid-template-columns:.65fr .9fr 1fr .65fr .8fr 1.2fr;gap:14px;margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+              ${calcDisplay("Preço médio do lote", rs(c.ticketMedio))}
+              ${calcDisplay("Custo aquisição terreno", rs(c.terrenoR))}
+              ${calcDisplay("Área entregue — perm. física", `${fmt(c.areaPermutaFis)} m²`)}
+              ${calcDisplay("Valor bruto perm. financeira", rs(c.permFinR))}
+              <div></div>
+              <div></div>
+            </div>
           </div>
         </div>
 
         <div class="section" style="margin-top:12px">
           <div class="section-head head-orange">4. Estrutura de custos</div>
           <div class="section-body">
-            <div style="display:grid;grid-template-columns:1.1fr 1fr 1.5fr .55fr .55fr .55fr;gap:14px;margin-bottom:14px">
+            <div style="display:grid;grid-template-columns:1.1fr 1fr 1.5fr 0.7fr;gap:14px;margin-bottom:14px">
               ${modeField("Infraestrutura", "costs.infraMode",
                 [{id:"m2", label:"R$/m²lot."}, {id:"pct", label:"% VGV"}],
                 {
@@ -711,10 +730,10 @@ function loteamentoView() {
                 }
               )}
               ${inputField("Registro", "costs.registroR", state.study.costs.registroR, { prefix: "R$", full: true })}
-              ${inputField("Manutenção", "costs.manutPosPct", state.study.costs.manutPosPct, { suffix: "%infra", full: true })}
-              ${inputField("Contingências", "costs.contingenciasPct", state.study.costs.contingenciasPct, { suffix: "%obras", full: true })}
             </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr 1.1fr .9fr;gap:14px">
+            <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:14px">
+              ${inputField("Manutenção pós-obra", "costs.manutPosPct", state.study.costs.manutPosPct, { suffix: "%infra", full: true })}
+              ${inputField("Contingências", "costs.contingenciasPct", state.study.costs.contingenciasPct, { suffix: "%obras", full: true })}
               ${inputField("Marketing", "costs.marketingPct", state.study.costs.marketingPct, { suffix: "%VGV", full: true })}
               ${inputField("Corretagem", "costs.corretagemPct", state.study.costs.corretagemPct, { suffix: "%VGV", full: true })}
               ${inputField("Administração e gestão", "costs.adminPct", state.study.costs.adminPct, { suffix: "%VGV", full: true })}
@@ -1726,10 +1745,10 @@ function newStudy() {
       impostosPct: 0,
       permFisicaPct: 0,
       permFinPct: 0,
-      permFinExcImpostos: false,
-      permFinExcCorretagem: false,
+      permFinExcImpostos: true,
+      permFinExcCorretagem: true,
       permFinExcMarketing: false,
-      permFinExcAdmin: false,
+      permFinExcAdmin: true,
       contingenciasPct: 0,
       terrenoM2: 0,
     },

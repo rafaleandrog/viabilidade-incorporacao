@@ -752,6 +752,24 @@ input[type=number]{-moz-appearance:textfield}
 .notice-ok{background:#e6f9f0;color:#1a7a4a;border:1px solid #b3e8cc}
 .notice-err{background:#fef2f2;color:#b91c1c;border:1px solid #fecaca}
 
+/* ── Calculated display (read-only computed values) ── */
+.calc-display{
+  padding:8px 0 2px;
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+}
+.calc-value{
+  font-size:14px;
+  font-family:'JetBrains Mono',monospace;
+  font-weight:700;
+  color:var(--primary);
+}
+.calc-sub{
+  font-size:11px;
+  color:var(--muted);
+}
+
 /* ── Terrenos ── */
 .terreno-file-input{
   margin-top:4px;
