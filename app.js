@@ -7,8 +7,8 @@ const STORAGE_KEYS = {
 
 const PROJECT_TYPES = [
   { id: "loteamento", label: "Loteamento", icon: "🏘️", enabled: true },
-  { id: "horizontal", label: "Incorporação Horizontal", icon: "🏡", enabled: false },
-  { id: "vertical", label: "Incorporação Vertical", icon: "🏢", enabled: false },
+  { id: "incorporacao", label: "Incorporação", icon: "🏗️", enabled: false },
+  { id: "bts", label: "BTS / Locação", icon: "🏭", enabled: false },
 ];
 
 const BENCHMARK_TEMPLATE = {
@@ -117,6 +117,10 @@ const state = {
   calc: null,
   savedScenarios: loadLocal(STORAGE_KEYS.scenarios, []),
   benchmarks: loadLocal(STORAGE_KEYS.benchmarks, BENCHMARK_TEMPLATE),
+  terrenos: loadLocal("viab_terrenos", []),
+  terrenoForm: { nome: "", cidade: "", estado: "", areaGleba: 0, areaApp: 0, fotoBase64: "", fotoNome: "" },
+  terrenoMessage: "",
+  showTerrenoPickerModal: false,
 };
 
 function loadLocal(key, fallback) {
@@ -211,8 +215,15 @@ function getDefaultStudy() {
       precoM2: 0,
     },
     costs: {
+      infraMode: "m2",
       infraM2: 0,
+      infraPct: 0,
+      projetoMode: "R$",
       projetoR: 0,
+      projetoPct: 0,
+      licenciamentoMode: "R$",
+      licenciamentoR: 0,
+      licenciamentoPct: 0,
       registroR: 0,
       manutPosPct: 2,
       marketingPct: 0,
@@ -221,11 +232,12 @@ function getDefaultStudy() {
       impostosPct: 0,
       permFisicaPct: 0,
       permFinPct: 0,
+      permFinExcImpostos: false,
+      permFinExcCorretagem: false,
+      permFinExcMarketing: false,
+      permFinExcAdmin: false,
       contingenciasPct: 0,
       terrenoM2: 0,
-      houseMes: 0,
-      houseCorretores: 6,
-      houseMeses: 6,
     },
   };
 }
@@ -308,9 +320,10 @@ function compute(study) {
   const manutPosR = infraR * num(c.manutPosPct) / 100;
 
   const custoObrasTotal = infraR + projetoFinalR + licenciamentoFinalR + registroR + manutPosR;
-  const resultadoOperacional = receitaLiquida - terrenoR - custoObrasTotal;
+  const contingenciasR = custoObrasTotal * num(c.contingenciasPct) / 100;
+  const resultadoOperacional = receitaLiquida - terrenoR - custoObrasTotal - contingenciasR;
 
-  // Após resultado operacional: admin, permuta financeira (base ajustável), contingências
+  // Após resultado operacional: admin, permuta financeira (base ajustável)
   const adminR = vgvBruto * num(c.adminPct) / 100;
   let permFinBase = vgvBruto;
   if (c.permFinExcImpostos)   permFinBase -= impostosR;
@@ -318,8 +331,7 @@ function compute(study) {
   if (c.permFinExcMarketing)  permFinBase -= marketingR;
   if (c.permFinExcAdmin)      permFinBase -= adminR;
   const permFinR = Math.max(0, permFinBase) * num(c.permFinPct) / 100;
-  const contingenciasR = custoObrasTotal * num(c.contingenciasPct) / 100;
-  const resultadoFinal = resultadoOperacional - permFinR - contingenciasR - adminR;
+  const resultadoFinal = resultadoOperacional - permFinR - adminR;
 
   const custoTotal = terrenoR + custoObrasTotal + impostosR + adminR + corretagemR + marketingR + permFinR + contingenciasR;
   const custoM2Lotes = areaTotalLotes ? custoObrasTotal / areaTotalLotes : 0;
@@ -495,8 +507,14 @@ function homeView() {
           <div class="phase-card available" onclick="openBenchmarks()">
             <div class="icon">📊</div>
             <h3>Benchmark</h3>
-            <p>Cadastre benchmarks urbanísticos e financeiros para Loteamento, Horizontal e Vertical.</p>
+            <p>Cadastre benchmarks urbanísticos e financeiros para comparação nos estudos.</p>
             <span class="badge ok">EDITÁVEL</span>
+          </div>
+          <div class="phase-card available" onclick="setView('terrenos')">
+            <div class="icon">📍</div>
+            <h3>Cadastrar Terrenos</h3>
+            <p>Registre terrenos com dados de área, APP e foto para uso rápido nos estudos.</p>
+            <span class="badge ok">DISPONÍVEL</span>
           </div>
         </div>
       </div>
@@ -556,6 +574,7 @@ function loteamentoView() {
         <div class="btn-row">
           <button class="btn gray" onclick="newStudy()">Novo estudo</button>
           <button class="btn blue" onclick="openStudyPicker()">Buscar estudos salvos</button>
+          <button class="btn primary" onclick="openTerrenoPicker()">📍 Selecionar terreno</button>
         </div>
       </div>
 
@@ -635,7 +654,6 @@ function loteamentoView() {
                 <div class="kpi-grid">
                   ${kpi("Área loteável", fmt(c.areaLoteavel), pc(c.areaLoteavelPct))}
                   ${kpiWithBm("Área lotes vendáveis", fmt(c.areaLotesVend), pc(c.areaLotesSobreLoteavelPct), c.areaLotesSobreLoteavelPct, bm.urban.areaLotesPct, true)}
-                  ${kpi("Área total dos lotes", fmt(c.areaTotalLotes), `${fmt(c.nLotes, 0)} lotes`)}
                   ${kpi("Área líquida de venda", fmt(c.areaLiquidaVenda), pc(c.areaLiquidaVendaPct))}
                 </div>
               </div>
@@ -664,24 +682,13 @@ function loteamentoView() {
               ${inputField("Permuta financeira", "costs.permFinPct", state.study.costs.permFinPct, { suffix: "%", full: true })}
               ${inputField("Terreno", "costs.terrenoM2", state.study.costs.terrenoM2, { prefix: "R$", suffix: "/m²total", full: true })}
             </div>
-            ${state.study.costs.permFinPct > 0 ? `
-              <div class="perm-fin-opts">
-                <p class="hint">Base da permuta financeira — excluir do cálculo:</p>
-                <div class="checkbox-group">
-                  <label class="checkbox-label"><input type="checkbox" ${state.study.costs.permFinExcImpostos ? "checked" : ""} onchange="setNested('costs.permFinExcImpostos',this.checked)"> Impostos sobre vendas</label>
-                  <label class="checkbox-label"><input type="checkbox" ${state.study.costs.permFinExcCorretagem ? "checked" : ""} onchange="setNested('costs.permFinExcCorretagem',this.checked)"> Corretagem</label>
-                  <label class="checkbox-label"><input type="checkbox" ${state.study.costs.permFinExcMarketing ? "checked" : ""} onchange="setNested('costs.permFinExcMarketing',this.checked)"> Marketing / publicidade</label>
-                  <label class="checkbox-label"><input type="checkbox" ${state.study.costs.permFinExcAdmin ? "checked" : ""} onchange="setNested('costs.permFinExcAdmin',this.checked)"> Gestão de carteira (admin)</label>
-                </div>
-              </div>
-            ` : ""}
           </div>
         </div>
 
         <div class="section" style="margin-top:12px">
           <div class="section-head head-orange">4. Estrutura de custos</div>
           <div class="section-body">
-            <div style="display:grid;grid-template-columns:1fr 1fr 1fr .7fr .7fr .7fr;gap:14px;margin-bottom:14px">
+            <div style="display:grid;grid-template-columns:1.1fr 1fr 1.5fr .55fr .55fr .55fr;gap:14px;margin-bottom:14px">
               ${modeField("Infraestrutura", "costs.infraMode",
                 [{id:"m2", label:"R$/m²lot."}, {id:"pct", label:"% VGV"}],
                 {
@@ -696,7 +703,7 @@ function loteamentoView() {
                   pct:  { path:"costs.projetoPct",  value: state.study.costs.projetoPct,  suffix:"%VGV" }
                 }
               )}
-              ${modeField("Licenciamento", "costs.licenciamentoMode",
+              ${modeField("Licenciamento e Custos Ambientais", "costs.licenciamentoMode",
                 [{id:"R$", label:"R$"}, {id:"pct", label:"% VGV"}],
                 {
                   "R$": { path:"costs.licenciamentoR",   value: state.study.costs.licenciamentoR,   prefix:"R$" },
@@ -707,54 +714,49 @@ function loteamentoView() {
               ${inputField("Manutenção", "costs.manutPosPct", state.study.costs.manutPosPct, { suffix: "%infra", full: true })}
               ${inputField("Contingências", "costs.contingenciasPct", state.study.costs.contingenciasPct, { suffix: "%obras", full: true })}
             </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:14px">
+            <div style="display:grid;grid-template-columns:1fr 1fr 1.1fr .9fr;gap:14px">
               ${inputField("Marketing", "costs.marketingPct", state.study.costs.marketingPct, { suffix: "%VGV", full: true })}
               ${inputField("Corretagem", "costs.corretagemPct", state.study.costs.corretagemPct, { suffix: "%VGV", full: true })}
-              ${inputField("Administração", "costs.adminPct", state.study.costs.adminPct, { suffix: "%VGV", full: true })}
-              ${inputField("Impostos vendas", "costs.impostosPct", state.study.costs.impostosPct, { suffix: "%VGV", full: true })}
+              ${inputField("Administração e gestão", "costs.adminPct", state.study.costs.adminPct, { suffix: "%VGV", full: true })}
+              ${inputField("Impostos", "costs.impostosPct", state.study.costs.impostosPct, { suffix: "%VGV", full: true })}
             </div>
           </div>
         </div>
 
         <div class="card-grid-2" style="margin-top:18px">
-          <div class="section">
-            <div class="section-head head-primary">Proforma financeiro</div>
-            <div class="section-body">
-              <div class="proforma-wrap">
-                <div class="proforma-title">PROFORMA LOTEAMENTO</div>
-                <div class="proforma-name">${state.study.nomeEstudo || "Sem nome"}</div>
-                <table class="proforma-table">
-                  <thead>
-                    <tr>
-                      <th style="width:52%;text-align:left"></th>
-                      <th style="width:20%">R$</th>
-                      <th style="width:18%">R$/m² venda líquida</th>
-                      <th style="width:10%;white-space:nowrap">% VGV</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    ${proformaRow(`VGV Potencial (${fmt(c.areaTotalLotes, 0)} m²)`, c.vgvPotencial, c.vgvPotencialPctSobreBruto, "row-pre-header")}
-                    ${c.permutaFisicaR > 0 ? proformaRow(`(-) Permuta física (${fmt(c.areaPermutaFis, 0)} m²)`, -c.permutaFisicaR, c.permutaFisicaPctSobreBruto, "row-pre-deduct") : ""}
-                    ${proformaRow("Receita bruta (VGV)", c.vgvBruto, 100, "row-sec")}
-                    ${proformaRow("(-) Impostos sobre vendas", -c.impostosR, pctOf(c.impostosR, c.vgvBruto), "row-expense")}
-                    ${proformaRow("(-) Corretagem", -c.corretagemR, pctOf(c.corretagemR, c.vgvBruto), "row-expense")}
-                    ${proformaRow("(-) Marketing e vendas", -c.marketingR, pctOf(c.marketingR, c.vgvBruto), "row-expense")}
-                    ${proformaRow("= Receita líquida", c.receitaLiquida, c.margemLiquidaPct, "row-sub")}
-                    ${proformaRow("(-) Pagamento do terreno", -c.terrenoR, pctOf(c.terrenoR, c.vgvBruto), "row-expense")}
-                    ${proformaRow("(-) Infraestrutura", -c.infraR, pctOf(c.infraR, c.vgvBruto), "row-expense")}
-                    ${proformaRow("(-) Projetos", -c.projetoFinalR, pctOf(c.projetoFinalR, c.vgvBruto), "row-expense")}
-                    ${proformaRow("(-) Licenciamento", -c.licenciamentoFinalR, pctOf(c.licenciamentoFinalR, c.vgvBruto), "row-expense")}
-                    ${proformaRow("(-) Registro", -c.registroR, pctOf(c.registroR, c.vgvBruto), "row-expense")}
-                    ${proformaRow("(-) Manutenção pós-obra", -c.manutPosR, pctOf(c.manutPosR, c.vgvBruto), "row-expense")}
-                    ${proformaRow("= Resultado operacional", c.resultadoOperacional, c.margemOperacionalPct, "row-sub")}
-                    ${proformaRow("(-) Permuta financeira", -c.permFinR, pctOf(c.permFinR, c.vgvBruto), "row-expense")}
-                    ${proformaRow("(-) Contingências", -c.contingenciasR, pctOf(c.contingenciasR, c.vgvBruto), "row-expense")}
-                    ${proformaRow("(-) Administração e gestão", -c.adminR, pctOf(c.adminR, c.vgvBruto), "row-expense")}
-                    ${proformaRow("= Resultado final", c.resultadoFinal, c.margemFinalPct, "row-result row-result-final")}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+          <div class="proforma-wrap">
+            <div class="proforma-title">PROFORMA LOTEAMENTO</div>
+            <div class="proforma-name">${state.study.nomeEstudo || "Sem nome"}</div>
+            <table class="proforma-table">
+              <thead>
+                <tr>
+                  <th style="width:52%;text-align:left"></th>
+                  <th style="width:20%">R$</th>
+                  <th style="width:18%">R$/m² venda líquida</th>
+                  <th style="width:10%;white-space:nowrap">% VGV</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${proformaRow(`VGV Potencial (${fmt(c.areaTotalLotes, 0)} m²)`, c.vgvPotencial, c.vgvPotencialPctSobreBruto, "row-pre-header")}
+                ${c.permutaFisicaR > 0 ? proformaRow(`(-) Permuta física (${fmt(c.areaPermutaFis, 0)} m²)`, -c.permutaFisicaR, c.permutaFisicaPctSobreBruto, "row-pre-deduct") : ""}
+                ${proformaRow("Receita bruta (VGV)", c.vgvBruto, 100, "row-sec")}
+                ${proformaRow("(-) Impostos", -c.impostosR, pctOf(c.impostosR, c.vgvBruto), "row-expense")}
+                ${proformaRow("(-) Corretagem", -c.corretagemR, pctOf(c.corretagemR, c.vgvBruto), "row-expense")}
+                ${proformaRow("(-) Marketing e vendas", -c.marketingR, pctOf(c.marketingR, c.vgvBruto), "row-expense")}
+                ${proformaRow("= Receita líquida", c.receitaLiquida, c.margemLiquidaPct, "row-sub")}
+                ${proformaRow("(-) Pagamento do terreno", -c.terrenoR, pctOf(c.terrenoR, c.vgvBruto), "row-expense")}
+                ${proformaRow("(-) Infraestrutura", -c.infraR, pctOf(c.infraR, c.vgvBruto), "row-expense")}
+                ${proformaRow("(-) Projetos", -c.projetoFinalR, pctOf(c.projetoFinalR, c.vgvBruto), "row-expense")}
+                ${proformaRow("(-) Licenciamento e Custos Ambientais", -c.licenciamentoFinalR, pctOf(c.licenciamentoFinalR, c.vgvBruto), "row-expense")}
+                ${proformaRow("(-) Registro", -c.registroR, pctOf(c.registroR, c.vgvBruto), "row-expense")}
+                ${proformaRow("(-) Manutenção pós-obra", -c.manutPosR, pctOf(c.manutPosR, c.vgvBruto), "row-expense")}
+                ${proformaRow("(-) Contingências", -c.contingenciasR, pctOf(c.contingenciasR, c.vgvBruto), "row-expense")}
+                ${proformaRow("= Resultado operacional", c.resultadoOperacional, c.margemOperacionalPct, "row-sub")}
+                ${proformaRow("(-) Permuta financeira", -c.permFinR, pctOf(c.permFinR, c.vgvBruto), "row-expense")}
+                ${proformaRow("(-) Administração e gestão de carteira", -c.adminR, pctOf(c.adminR, c.vgvBruto), "row-expense")}
+                ${proformaRow("= Resultado final", c.resultadoFinal, c.margemFinalPct, "row-result row-result-final")}
+              </tbody>
+            </table>
           </div>
 
           <div class="section">
@@ -764,12 +766,21 @@ function loteamentoView() {
                 ${kpi("Receita líquida", rs(c.receitaLiquida), pc(c.margemLiquidaPct))}
                 ${kpiWithBm("Resultado operacional", rs(c.resultadoOperacional), pc(c.margemOperacionalPct), c.margemOperacionalPct, bm.financial.margemOperacionalPct, true)}
                 ${kpiWithBm("Resultado final", rs(c.resultadoFinal), pc(c.margemFinalPct), c.margemFinalPct, bm.financial.margemFinalPct, true)}
-                ${kpiWithBm("Margem final / VGV", pc(c.margemFinalPct), "rentabilidade final", c.margemFinalPct, bm.financial.margemFinalPct, true)}
-                ${kpi("Custo total", rs(c.custoTotal), pc(c.custoTotalPct))}
                 ${kpiWithBm("Custo obras / VGV", pc(c.custoObrasPct), rs(c.custoObrasTotal), c.custoObrasPct, bm.financial.custoObrasPct, false)}
                 ${kpi("Preço médio por lote", rs(c.ticketMedio), `${fmt(c.nLotes, 0)} lotes`)}
                 ${kpi("Relação preço/custo m²", `${fmt(c.relPrecoCusto)}x`, `Preço: R$ ${fmt(c.precoM2)}/m²`)}
               </div>
+              ${state.study.costs.permFinPct > 0 ? `
+                <div class="perm-fin-opts" style="margin-top:12px">
+                  <p class="hint">Base da permuta financeira — excluir do cálculo:</p>
+                  <div class="checkbox-group">
+                    <label class="checkbox-label"><input type="checkbox" ${state.study.costs.permFinExcImpostos ? "checked" : ""} onchange="setNested('costs.permFinExcImpostos',this.checked)"> Impostos</label>
+                    <label class="checkbox-label"><input type="checkbox" ${state.study.costs.permFinExcCorretagem ? "checked" : ""} onchange="setNested('costs.permFinExcCorretagem',this.checked)"> Corretagem</label>
+                    <label class="checkbox-label"><input type="checkbox" ${state.study.costs.permFinExcMarketing ? "checked" : ""} onchange="setNested('costs.permFinExcMarketing',this.checked)"> Marketing / publicidade</label>
+                    <label class="checkbox-label"><input type="checkbox" ${state.study.costs.permFinExcAdmin ? "checked" : ""} onchange="setNested('costs.permFinExcAdmin',this.checked)"> Gestão de carteira (admin)</label>
+                  </div>
+                </div>
+              ` : ""}
               <div class="spacer"></div>
               <div class="footer-actions no-print">
                 <div class="btn-row">
@@ -803,6 +814,7 @@ function loteamentoView() {
 
       ${state.showBenchmarkModal ? benchmarkModal() : ""}
       ${state.showStudyPickerModal ? studyPickerModal() : ""}
+      ${state.showTerrenoPickerModal ? terrenoPickerModal() : ""}
     </div>
   `;
 }
@@ -980,10 +992,13 @@ async function postToAppsScript(action, payload) {
   if (!APPS_SCRIPT_URL || APPS_SCRIPT_URL.includes("COLE_AQUI")) {
     throw new Error("A URL do Apps Script ainda não foi configurada.");
   }
-
+  // mode: no-cors evita o erro CORS ao enviar para Apps Script
+  // credentials: include envia os cookies de autenticação do Google Workspace
+  // A resposta é opaca (no-cors) — não é possível ler o corpo ou o status
   await fetch(APPS_SCRIPT_URL, {
     method: "POST",
     mode: "no-cors",
+    credentials: "include",
     headers: { "Content-Type": "text/plain;charset=utf-8" },
     body: JSON.stringify({ action, payload }),
   });
@@ -1002,7 +1017,7 @@ async function getFromAppsScript(action, params = {}) {
   const query = new URLSearchParams({ action, ...params }).toString();
   const url = `${APPS_SCRIPT_URL}?${query}`;
 
-  const response = await fetch(url);
+  const response = await fetch(url, { credentials: "include" });
 
   if (!response.ok) {
     throw new Error(`Falha HTTP ${response.status}`);
@@ -1744,6 +1759,7 @@ function render() {
     if (state.view === "home") return homeView();
     if (state.view === "projectType") return projectTypeView();
     if (state.view === "loteamento") return loteamentoView();
+    if (state.view === "terrenos") return terrenosView();
     return homeView();
   })();
   return view + globalOverlays();
@@ -1823,6 +1839,226 @@ function rerender() {
   }
 }
 
+// ─── Terrenos ─────────────────────────────────────────────────────────────────
+
+const UF_LIST = ["AC","AL","AP","AM","BA","CE","DF","ES","GO","MA","MT","MS","MG","PA","PB","PR","PE","PI","RJ","RN","RS","RO","RR","SC","SP","SE","TO"];
+
+function generateTerrenoId() {
+  return "TER-" + Date.now().toString(36).toUpperCase() + Math.random().toString(36).slice(2, 5).toUpperCase();
+}
+
+function setTerrenoField(key, value) {
+  state.terrenoForm[key] = value;
+  rerender();
+}
+
+function handleFotoUpload(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    state.terrenoForm.fotoBase64 = e.target.result;
+    state.terrenoForm.fotoNome = file.name;
+    rerender();
+  };
+  reader.readAsDataURL(file);
+}
+
+async function saveTerrenoLocal() {
+  const f = state.terrenoForm;
+  if (!f.nome.trim()) {
+    state.terrenoMessage = "Informe o nome do terreno antes de salvar.";
+    rerender();
+    return;
+  }
+  const t = {
+    id: generateTerrenoId(),
+    createdAt: new Date().toISOString(),
+    nome: f.nome.trim(),
+    cidade: f.cidade.trim(),
+    estado: f.estado,
+    areaGleba: f.areaGleba,
+    areaApp: f.areaApp,
+    fotoBase64: f.fotoBase64,
+    fotoNome: f.fotoNome,
+  };
+  state.terrenos.push(t);
+  saveLocal("viab_terrenos", state.terrenos);
+
+  // Envia para Sheets sem a foto (campo grande demais para célula)
+  try {
+    const { fotoBase64: _foto, ...semFoto } = t;
+    await postToAppsScript("saveTerrain", semFoto);
+    state.terrenoMessage = "Terreno salvo com sucesso.";
+  } catch (err) {
+    state.terrenoMessage = "Salvo localmente. Erro ao enviar para a planilha: " + err.message;
+  }
+
+  state.terrenoForm = { nome: "", cidade: "", estado: "", areaGleba: 0, areaApp: 0, fotoBase64: "", fotoNome: "" };
+  rerender();
+}
+
+function removeTerrenoLocal(id) {
+  state.terrenos = state.terrenos.filter((t) => t.id !== id);
+  saveLocal("viab_terrenos", state.terrenos);
+  rerender();
+}
+
+function terrenosView() {
+  const f = state.terrenoForm;
+  return `
+    <div class="view">
+      <div class="page-header">
+        <div class="top-breadcrumb">
+          <button class="nav-btn" onclick="setView('home')">← Home</button>
+          <span class="crumb">Cadastrar Terrenos</span>
+        </div>
+      </div>
+
+      <div class="container">
+        <div class="card-grid-2">
+          <div class="section">
+            <div class="section-head head-primary">Novo terreno</div>
+            <div class="section-body">
+              <div class="field">
+                <label>Nome do terreno</label>
+                <div class="input-wrap full">
+                  <input class="inp text" type="text" value="${f.nome}"
+                    oninput="setTerrenoField('nome',this.value)" placeholder="Ex: Gleba Santa Clara" />
+                </div>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr .6fr;gap:14px">
+                <div class="field">
+                  <label>Cidade</label>
+                  <div class="input-wrap full">
+                    <input class="inp text" type="text" value="${f.cidade}"
+                      oninput="setTerrenoField('cidade',this.value)" />
+                  </div>
+                </div>
+                <div class="field">
+                  <label>Estado (UF)</label>
+                  <div class="input-wrap full">
+                    <select class="inp" onchange="setTerrenoField('estado',this.value)" style="cursor:pointer">
+                      <option value="">—</option>
+                      ${UF_LIST.map(uf => `<option value="${uf}"${f.estado === uf ? " selected" : ""}>${uf}</option>`).join("")}
+                    </select>
+                  </div>
+                </div>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+                <div class="field">
+                  <label>Área da gleba</label>
+                  <div class="input-wrap full">
+                    <input class="inp" type="text" inputmode="decimal"
+                      value="${f.areaGleba || ""}"
+                      oninput="setTerrenoField('areaGleba',parseFloat(this.value.replace(/\\./g,'').replace(',','.'))||0)" />
+                    <span class="affix">m²</span>
+                  </div>
+                </div>
+                <div class="field">
+                  <label>APP (Preservação Ambiental)</label>
+                  <div class="input-wrap full">
+                    <input class="inp" type="text" inputmode="decimal"
+                      value="${f.areaApp || ""}"
+                      oninput="setTerrenoField('areaApp',parseFloat(this.value.replace(/\\./g,'').replace(',','.'))||0)" />
+                    <span class="affix">m²</span>
+                  </div>
+                </div>
+              </div>
+              <div class="field">
+                <label>Foto da gleba</label>
+                <input type="file" accept="image/*" class="terreno-file-input"
+                  onchange="handleFotoUpload(this)" />
+                ${f.fotoBase64 ? `<div class="terreno-preview"><img class="terreno-thumb-large" src="${f.fotoBase64}" alt="${f.fotoNome}" /></div>` : ""}
+              </div>
+              ${state.terrenoMessage ? `<div class="${state.terrenoMessage.startsWith("Salvo") || state.terrenoMessage.includes("sucesso") ? "notice" : "error"}" style="margin-bottom:10px">${state.terrenoMessage}</div>` : ""}
+              <div class="btn-row">
+                <button class="btn green" onclick="saveTerrenoLocal()">Salvar terreno</button>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <div class="section">
+              <div class="section-head head-orange">Terrenos cadastrados (${state.terrenos.length})</div>
+              <div class="section-body">
+                ${state.terrenos.length === 0 ? `<div class="muted">Nenhum terreno cadastrado ainda.</div>` :
+                  state.terrenos.map(t => `
+                    <div class="terreno-item">
+                      ${t.fotoBase64 ? `<img class="terreno-thumb" src="${t.fotoBase64}" alt="${t.fotoNome || "foto"}" />` : `<div class="terreno-thumb no-foto">📍</div>`}
+                      <div style="flex:1;min-width:0">
+                        <strong style="display:block;font-size:14px;margin-bottom:3px">${t.nome}</strong>
+                        <span style="font-size:12px;color:var(--muted)">${t.cidade}${t.estado ? " · " + t.estado : ""}</span>
+                        <span style="font-size:12px;color:var(--muted);display:block">Gleba: ${fmt(t.areaGleba)} m² · APP: ${fmt(t.areaApp)} m²</span>
+                      </div>
+                      <button class="btn danger" style="padding:6px 10px;font-size:11px" onclick="removeTerrenoLocal('${t.id}')">✕</button>
+                    </div>
+                  `).join("")
+                }
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      ${globalOverlays()}
+    </div>
+  `;
+}
+
+function openTerrenoPicker() {
+  if (state.terrenos.length === 0) {
+    state.sheetMessage = "Nenhum terreno cadastrado. Acesse 'Cadastrar Terrenos' na home para adicionar.";
+    rerender();
+    return;
+  }
+  state.showTerrenoPickerModal = true;
+  rerender();
+}
+
+function closeTerrenoPicker(e) {
+  if (!e || (e.target && e.target.classList && e.target.classList.contains("modal-overlay"))) {
+    state.showTerrenoPickerModal = false;
+    rerender();
+  }
+}
+
+function selectTerrenoForStudy(id) {
+  const t = state.terrenos.find((x) => x.id === id);
+  if (!t) return;
+  if (t.cidade) state.study.cidade = t.cidade;
+  if (!state.study.urban.areaTotal && t.areaGleba) state.study.urban.areaTotal = t.areaGleba;
+  if (!state.study.urban.percApp && t.areaApp && t.areaGleba) {
+    state.study.urban.percApp = Math.round((t.areaApp / t.areaGleba) * 100 * 100) / 100;
+  }
+  state.sheetMessage = `Terreno "${t.nome}" aplicado ao estudo.`;
+  state.showTerrenoPickerModal = false;
+  rerender();
+}
+
+function terrenoPickerModal() {
+  return `
+    <div class="modal-overlay" onclick="closeTerrenoPicker(event)">
+      <div class="modal study-modal" onclick="event.stopPropagation()">
+        <h3>Selecionar terreno</h3>
+        <p>Escolha um terreno para pré-preencher os dados do estudo.</p>
+        <div class="study-list">
+          ${state.terrenos.map(t => `
+            <button class="study-item" onclick="selectTerrenoForStudy('${t.id}')">
+              <strong>${t.nome}</strong>
+              <span>${t.cidade}${t.estado ? " · " + t.estado : ""} · Gleba: ${fmt(t.areaGleba)} m² · APP: ${fmt(t.areaApp)} m²</span>
+            </button>
+          `).join("")}
+        </div>
+        <div class="spacer"></div>
+        <div class="footer-actions">
+          <button class="btn gray" onclick="closeTerrenoPicker()">Fechar</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 function bootApp() {
   const root = document.getElementById("root");
   if (!root) {
@@ -1851,6 +2087,13 @@ function bootApp() {
   window.openFeedback = openFeedback;
   window.closeFeedback = closeFeedback;
   window.submitFeedback = submitFeedback;
+  window.setTerrenoField = setTerrenoField;
+  window.handleFotoUpload = handleFotoUpload;
+  window.saveTerrenoLocal = saveTerrenoLocal;
+  window.removeTerrenoLocal = removeTerrenoLocal;
+  window.openTerrenoPicker = openTerrenoPicker;
+  window.closeTerrenoPicker = closeTerrenoPicker;
+  window.selectTerrenoForStudy = selectTerrenoForStudy;
 
   try {
     rerender();
