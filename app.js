@@ -1,8 +1,11 @@
+// Use sempre a URL pública de Web App do Apps Script (sem /a/macros/<dominio>/)
+// para permitir chamadas a partir do GitHub Pages sem dependência de sessão Google.
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwZ9itEkqLp9QWPn5NK1olS9j9FLrGrIdVpnXIszbDL7Wv_pWL4zxBrMRlUz1MqcHq-pw/exec";
 
 const STORAGE_KEYS = {
   benchmarks: "viab_benchmarks_v1",
   scenarios: "viab_scenarios_v1",
+  terrenos: "viab_terrenos_v3",
 };
 
 const PROJECT_TYPES = [
@@ -98,19 +101,21 @@ const state = {
       licenciamentoMode: "R$",
       licenciamentoR: 0,
       licenciamentoPct: 0,
+      registroMode: "R$",
       registroR: 0,
+      registroPct: 0,
       manutPosPct: 2,
-      marketingPct: 0,
-      corretagemPct: 0,
-      adminPct: 0,
-      impostosPct: 0,
+      marketingPct: 2.5,
+      corretagemPct: 5,
+      adminPct: 0.75,
+      impostosPct: 4,
       permFisicaPct: 0,
       permFinPct: 0,
       permFinExcImpostos: true,
       permFinExcCorretagem: true,
       permFinExcMarketing: false,
       permFinExcAdmin: true,
-      contingenciasPct: 0,
+      contingenciasPct: 1.5,
       terrenoM2: 0,
     },
   },
@@ -223,19 +228,21 @@ function getDefaultStudy() {
       licenciamentoMode: "R$",
       licenciamentoR: 0,
       licenciamentoPct: 0,
+      registroMode: "R$",
       registroR: 0,
+      registroPct: 0,
       manutPosPct: 2,
-      marketingPct: 0,
-      corretagemPct: 0,
-      adminPct: 0,
-      impostosPct: 0,
+      marketingPct: 2.5,
+      corretagemPct: 5,
+      adminPct: 0.75,
+      impostosPct: 4,
       permFisicaPct: 0,
       permFinPct: 0,
       permFinExcImpostos: true,
       permFinExcCorretagem: true,
       permFinExcMarketing: false,
       permFinExcAdmin: true,
-      contingenciasPct: 0,
+      contingenciasPct: 1.5,
       terrenoM2: 0,
     },
   };
@@ -244,13 +251,22 @@ function getDefaultStudy() {
 function normalizeLoadedStudy(payload) {
   const base = getDefaultStudy();
   const loaded = payload && payload.study ? payload.study : {};
+  const loadedCosts = { ...(loaded.costs || {}) };
+  const seemsOldInfraDefault = loadedCosts.infraMode === "m2"
+    && num(loadedCosts.infraM2) === 30
+    && num(loadedCosts.infraPct) === 0;
+  if (!("infraMode" in loadedCosts) || seemsOldInfraDefault) {
+    loadedCosts.infraMode = "pct";
+    loadedCosts.infraPct = 30;
+    loadedCosts.infraM2 = 0;
+  }
 
   return {
     ...base,
     ...loaded,
     urban: { ...base.urban, ...(loaded.urban || {}) },
     product: { ...base.product, ...(loaded.product || {}) },
-    costs: { ...base.costs, ...(loaded.costs || {}) },
+    costs: { ...base.costs, ...loadedCosts },
   };
 }
 
@@ -315,7 +331,9 @@ function compute(study) {
   const licenciamentoFinalR = c.licenciamentoMode === "pct"
     ? vgvBruto * num(c.licenciamentoPct) / 100
     : num(c.licenciamentoR);
-  const registroR = num(c.registroR);
+  const registroR = c.registroMode === "pct"
+    ? vgvBruto * num(c.registroPct) / 100
+    : num(c.registroR);
   const manutPosR = infraR * num(c.manutPosPct) / 100;
 
   const custoObrasTotal = infraR + projetoFinalR + licenciamentoFinalR + registroR + manutPosR;
@@ -324,12 +342,13 @@ function compute(study) {
 
   // Após resultado operacional: admin, permuta financeira (base ajustável)
   const adminR = vgvBruto * num(c.adminPct) / 100;
-  let permFinBase = vgvBruto;
-  if (c.permFinExcImpostos)   permFinBase -= impostosR;
-  if (c.permFinExcCorretagem) permFinBase -= corretagemR;
-  if (c.permFinExcMarketing)  permFinBase -= marketingR;
-  if (c.permFinExcAdmin)      permFinBase -= adminR;
-  const permFinR = Math.max(0, permFinBase) * num(c.permFinPct) / 100;
+  const permFinBrutoR = vgvBruto * num(c.permFinPct) / 100;
+  let permFinReducaoR = 0;
+  if (c.permFinExcImpostos)   permFinReducaoR += impostosR;
+  if (c.permFinExcCorretagem) permFinReducaoR += corretagemR;
+  if (c.permFinExcMarketing)  permFinReducaoR += marketingR;
+  if (c.permFinExcAdmin)      permFinReducaoR += adminR;
+  const permFinR = Math.max(0, permFinBrutoR - permFinReducaoR);
   const resultadoFinal = resultadoOperacional - permFinR - adminR;
 
   const custoTotal = terrenoR + custoObrasTotal + impostosR + adminR + corretagemR + marketingR + permFinR + contingenciasR;
@@ -409,11 +428,11 @@ function setView(view, extra = {}) {
 }
 
 function inputField(label, path, value, opts = {}) {
-  const { suffix = "", prefix = "", full = false, text = false } = opts;
+  const { suffix = "", prefix = "", full = false, text = false, integer = false } = opts;
   const isPercentField = suffix.includes("%");
   const displayVal = text
     ? (_activePath === path ? _activeRaw : (value ?? ""))
-    : (_activePath === path ? _activeRaw : (isPercentField ? fmt(value, 2) : fmtBR(value)));
+    : (_activePath === path ? _activeRaw : (integer ? fmt(value, 0) : (isPercentField ? fmt(value, 2) : fmtBR(value))));
 
   return `
     <div class="field">
@@ -424,6 +443,7 @@ function inputField(label, path, value, opts = {}) {
           type="text"
           ${!text ? 'inputmode="decimal"' : ''}
           ${text ? 'data-text="true"' : ''}
+          ${integer ? 'data-integer="true"' : ''}
           value="${displayVal}"
           data-path="${path}" />
         ${suffix ? `<span class="affix">${suffix}</span>` : ""}
@@ -523,8 +543,8 @@ function homeView() {
           </div>
           <div class="phase-card available" onclick="setView('terrenos')">
             <div class="icon">📍</div>
-            <h3>Cadastrar Terrenos</h3>
-            <p>Registre terrenos com dados de área, APP e foto para uso rápido nos estudos.</p>
+            <h3>Terrenos</h3>
+            <p>Registre terrenos por área temática e visualize no mapa com busca rápida.</p>
             <span class="badge ok">DISPONÍVEL</span>
           </div>
         </div>
@@ -686,12 +706,12 @@ function loteamentoView() {
           <div class="section-head head-primary">3. Parâmetros do produto e preço</div>
           <div class="section-body">
             <div style="display:grid;grid-template-columns:.65fr .9fr 1fr .65fr .8fr 1.2fr;gap:14px">
-              ${inputField("Número de lotes", "product.nLotes", state.study.product.nLotes, { full: true })}
+              ${inputField("Número de lotes", "product.nLotes", state.study.product.nLotes, { full: true, integer: true })}
               ${inputField("Área média do lote", "product.areaMedia", state.study.product.areaMedia, { suffix: "m²", full: true })}
               ${inputField("Preço por m²", "product.precoM2", state.study.product.precoM2, { prefix: "R$", suffix: "/m²", full: true })}
               ${inputField("Permuta física", "costs.permFisicaPct", state.study.costs.permFisicaPct, { suffix: "%", full: true })}
               ${inputField("Permuta financeira", "costs.permFinPct", state.study.costs.permFinPct, { suffix: "%", full: true })}
-              ${inputField("Terreno", "costs.terrenoM2", state.study.costs.terrenoM2, { prefix: "R$", suffix: "/m²total", full: true })}
+              ${inputField("Terreno", "costs.terrenoM2", state.study.costs.terrenoM2, { prefix: "R$", suffix: "/m² gleba", full: true })}
             </div>
             <div style="display:grid;grid-template-columns:.65fr .9fr 1fr .65fr .8fr 1.2fr;gap:14px;margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
               ${calcDisplay("Preço médio do lote", rs(c.ticketMedio))}
@@ -709,7 +729,7 @@ function loteamentoView() {
           <div class="section-body">
             <div style="display:grid;grid-template-columns:1.2fr 1fr 1fr 1fr;gap:14px;margin-bottom:14px">
               ${modeField("Infraestrutura", "costs.infraMode",
-                [{id:"m2", label:"R$/m²lot."}, {id:"pct", label:"% VGV"}],
+                [{id:"pct", label:"% VGV"}, {id:"m2", label:"R$/m²lot."}],
                 {
                   m2:  { path:"costs.infraM2",  value: state.study.costs.infraM2,  prefix:"R$", suffix:"/m²lot." },
                   pct: { path:"costs.infraPct",  value: state.study.costs.infraPct,  suffix:"%VGV" }
@@ -729,7 +749,13 @@ function loteamentoView() {
                   pct:  { path:"costs.licenciamentoPct",  value: state.study.costs.licenciamentoPct,  suffix:"%VGV" }
                 }
               )}
-              ${inputField("Registro", "costs.registroR", state.study.costs.registroR, { prefix: "R$", full: true })}
+              ${modeField("Registro", "costs.registroMode",
+                [{id:"R$", label:"R$"}, {id:"pct", label:"% VGV"}],
+                {
+                  "R$": { path:"costs.registroR",   value: state.study.costs.registroR,   prefix:"R$" },
+                  pct:  { path:"costs.registroPct", value: state.study.costs.registroPct, suffix:"%VGV" }
+                }
+              )}
             </div>
             <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:14px">
               ${inputField("Manutenção pós-obra", "costs.manutPosPct", state.study.costs.manutPosPct, { suffix: "%infra", full: true })}
@@ -1013,21 +1039,31 @@ async function postToAppsScript(action, payload) {
   if (!APPS_SCRIPT_URL || APPS_SCRIPT_URL.includes("COLE_AQUI")) {
     throw new Error("A URL do Apps Script ainda não foi configurada.");
   }
-  // mode: no-cors evita o erro CORS ao enviar para Apps Script
-  // credentials: include envia os cookies de autenticação do Google Workspace
-  // A resposta é opaca (no-cors) — não é possível ler o corpo ou o status
-  await fetch(APPS_SCRIPT_URL, {
-    method: "POST",
-    mode: "no-cors",
-    credentials: "include",
-    headers: { "Content-Type": "text/plain;charset=utf-8" },
-    body: JSON.stringify({ action, payload }),
-  });
+  let response;
+  try {
+    response = await fetch(APPS_SCRIPT_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ action, payload }),
+    });
+  } catch (error) {
+    throw new Error("Falha de rede ao salvar no Apps Script. Verifique a URL publicada e a implantação do Web App.");
+  }
 
-  return {
-    ok: true,
-    message: "Requisição enviada ao Apps Script."
-  };
+  if (!response.ok) {
+    throw new Error(`Falha HTTP ${response.status} ao salvar no Apps Script.`);
+  }
+
+  const raw = await response.text();
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed.ok) {
+      throw new Error(parsed.message || "Apps Script retornou erro ao salvar.");
+    }
+    return parsed;
+  } catch {
+    throw new Error(`Resposta inválida do Apps Script: ${raw.slice(0, 160)}`);
+  }
 }
 
 async function getFromAppsScript(action, params = {}) {
@@ -1038,7 +1074,12 @@ async function getFromAppsScript(action, params = {}) {
   const query = new URLSearchParams({ action, ...params }).toString();
   const url = `${APPS_SCRIPT_URL}?${query}`;
 
-  const response = await fetch(url, { credentials: "include" });
+  let response;
+  try {
+    response = await fetch(url);
+  } catch (error) {
+    throw new Error("Falha de rede ao consultar o Apps Script. Verifique se a URL é pública e se o deploy está ativo.");
+  }
 
   if (!response.ok) {
     throw new Error(`Falha HTTP ${response.status}`);
@@ -1743,19 +1784,21 @@ function newStudy() {
       licenciamentoMode: "R$",
       licenciamentoR: 0,
       licenciamentoPct: 0,
+      registroMode: "R$",
       registroR: 0,
+      registroPct: 0,
       manutPosPct: 2,
-      marketingPct: 0,
-      corretagemPct: 0,
-      adminPct: 0,
-      impostosPct: 0,
+      marketingPct: 2.5,
+      corretagemPct: 5,
+      adminPct: 0.75,
+      impostosPct: 4,
       permFisicaPct: 0,
       permFinPct: 0,
       permFinExcImpostos: true,
       permFinExcCorretagem: true,
       permFinExcMarketing: false,
       permFinExcAdmin: true,
-      contingenciasPct: 0,
+      contingenciasPct: 1.5,
       terrenoM2: 0,
     },
   };
@@ -1800,9 +1843,10 @@ function attachEvents() {
     el.addEventListener("blur", (e) => {
       const path = e.target.getAttribute("data-path");
       const isText = e.target.getAttribute("data-text") === "true";
+      const isInteger = e.target.getAttribute("data-integer") === "true";
       if (!isText) {
         const val = getNestedValue(path);
-        e.target.value = fmtBR(val);
+        e.target.value = isInteger ? fmt(val, 0) : fmtBR(val);
       }
       _activePath = null;
       _activeRaw = "";
@@ -1811,6 +1855,7 @@ function attachEvents() {
     el.addEventListener("input", (e) => {
       const path = e.target.getAttribute("data-path");
       const isText = e.target.getAttribute("data-text") === "true";
+      const isInteger = e.target.getAttribute("data-integer") === "true";
       _activePath = path;
       _activeRaw = e.target.value;
 
@@ -1818,7 +1863,8 @@ function attachEvents() {
         setNested(path, e.target.value);
       } else {
         const raw = e.target.value.replace(/\./g, "").replace(",", ".");
-        setNested(path, num(raw));
+        const parsed = num(raw);
+        setNested(path, isInteger ? Math.trunc(parsed) : parsed);
       }
     });
   });
@@ -1874,6 +1920,10 @@ function rerender() {
 // ─── Terrenos ─────────────────────────────────────────────────────────────────
 
 const UF_LIST = ["AC","AL","AP","AM","BA","CE","DF","ES","GO","MA","MT","MS","MG","PA","PB","PR","PE","PI","RJ","RN","RS","RO","RR","SC","SP","SE","TO"];
+const TERRENO_TEMAS = [
+  { group: "UP", items: ["Regularização", "Urbitá"] },
+  { group: "Novos Negócios", items: ["Vespasiano", "Alto Paraíso"] },
+];
 
 function generateTerrenoId() {
   return "TER-" + Date.now().toString(36).toUpperCase() + Math.random().toString(36).slice(2, 5).toUpperCase();
@@ -1884,13 +1934,20 @@ function setTerrenoField(key, value) {
   rerender();
 }
 
-function handleFotoUpload(input) {
+function handleKmlUpload(input) {
+  const file = input.files[0];
+  if (!file) return;
+  state.terrenoForm.kmlNome = file.name;
+  rerender();
+}
+
+function handleTerrenoBoardUpload(input) {
   const file = input.files[0];
   if (!file) return;
   const reader = new FileReader();
-  reader.onload = (e) => {
-    state.terrenoForm.fotoBase64 = e.target.result;
-    state.terrenoForm.fotoNome = file.name;
+  reader.onload = () => {
+    state.terrenoForm.quadroImagem = String(reader.result || "");
+    state.terrenoForm.quadroImagemNome = file.name;
     rerender();
   };
   reader.readAsDataURL(file);
@@ -1968,11 +2025,36 @@ async function saveTerrenoLocal() {
 
 function removeTerrenoLocal(id) {
   state.terrenos = state.terrenos.filter((t) => t.id !== id);
-  saveLocal("viab_terrenos", state.terrenos);
+  saveLocal(STORAGE_KEYS.terrenos, state.terrenos);
   rerender();
 }
 
-function terrenosView() {
+function setTerrenoTema(tema) {
+  state.terrenoTema = tema;
+  state.terrenoSearch = "";
+  state.terrenoSelecionadoId = null;
+  state.terrenoMessage = "";
+  rerender();
+}
+
+function setTerrenoSearch(v) {
+  state.terrenoSearch = v || "";
+  rerender();
+}
+
+function selectTerrenoMapa(id) {
+  state.terrenoSelecionadoId = id;
+  rerender();
+}
+
+function terrenoMapUrl(terreno) {
+  const q = terreno
+    ? `${terreno.nome} ${terreno.cidade || ""} ${terreno.estado || ""}`.trim()
+    : "Brasil";
+  return `https://www.google.com/maps?q=${encodeURIComponent(q)}&output=embed`;
+}
+
+function terrenoCadastroForm() {
   const f = state.terrenoForm;
   const cards = state.terrenos.map(t => `
     <div class="terreno-card">
@@ -1996,24 +2078,144 @@ function terrenosView() {
   `).join("");
 
   return `
+    <div class="section">
+      <div class="section-head head-blue">Cadastro único de terreno</div>
+      <div class="section-body">
+        <div class="field">
+          <label>Tema</label>
+          <div class="input-wrap full">
+            <select class="inp" onchange="setTerrenoField('tema',this.value)" style="cursor:pointer">
+              <option value="">Selecione…</option>
+              ${TERRENO_TEMAS.flatMap(group => group.items).map(item => `<option value="${item}"${f.tema === item ? " selected" : ""}>${item}</option>`).join("")}
+            </select>
+          </div>
+        </div>
+        <div class="field">
+          <label>Nome</label>
+          <div class="input-wrap full">
+            <input class="inp text" type="text" value="${f.nome}"
+              oninput="setTerrenoField('nome',this.value)" placeholder="Ex: Gleba Santa Clara" />
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr .6fr;gap:14px">
+          <div class="field">
+            <label>Cidade</label>
+            <div class="input-wrap full">
+              <input class="inp text" type="text" value="${f.cidade}" oninput="setTerrenoField('cidade',this.value)" />
+            </div>
+          </div>
+          <div class="field">
+            <label>Estado (UF)</label>
+            <div class="input-wrap full">
+              <select class="inp" onchange="setTerrenoField('estado',this.value)" style="cursor:pointer">
+                <option value="">—</option>
+                ${UF_LIST.map(uf => `<option value="${uf}"${f.estado === uf ? " selected" : ""}>${uf}</option>`).join("")}
+              </select>
+            </div>
+          </div>
+        </div>
+        <div class="field">
+          <label>Área da gleba</label>
+          <div class="input-wrap full">
+            <input class="inp" type="text" inputmode="decimal"
+              value="${f.areaGleba || ""}"
+              oninput="setTerrenoField('areaGleba',parseFloat(this.value.replace(/\\./g,'').replace(',','.'))||0)" />
+            <span class="affix">m²</span>
+          </div>
+        </div>
+        <div class="field">
+          <label>Arquivo KML</label>
+          <input type="file" accept=".kml,.kmz,application/vnd.google-earth.kml+xml,application/vnd.google-earth.kmz" class="terreno-file-input"
+            onchange="handleKmlUpload(this)" />
+          ${f.kmlNome ? `<div class="muted" style="margin-top:4px">Arquivo selecionado: ${f.kmlNome}</div>` : ""}
+        </div>
+        <div class="field">
+          <label>Quadro visual (imagem + notas)</label>
+          <div class="terreno-board">
+            <div class="terreno-board-media">
+              <input id="terreno-board-upload" type="file" accept="image/*" class="terreno-board-upload-input" onchange="handleTerrenoBoardUpload(this)" />
+              <label for="terreno-board-upload" class="terreno-board-dropzone">
+                ${f.quadroImagem
+                  ? `<img src="${f.quadroImagem}" alt="Prévia do quadro do terreno" class="terreno-board-image" />`
+                  : `<div><strong>Adicionar imagem do terreno</strong><span>Arraste ou clique para carregar uma referência visual (Notion/Trello style).</span></div>`}
+              </label>
+              ${f.quadroImagem ? `<div class="btn-row" style="margin-top:8px"><button class="btn gray" type="button" onclick="clearTerrenoBoardImage()">Remover imagem</button></div>` : ""}
+            </div>
+            <textarea class="feedback-text terreno-board-notes" placeholder="Anotações do quadro visual, checklist, ideias de produto, etc." oninput="setTerrenoField('quadroNotas',this.value)">${f.quadroNotas || ""}</textarea>
+          </div>
+        </div>
+        ${state.terrenoMessage ? `<div class="${state.terrenoMessage.startsWith("Salvo") || state.terrenoMessage.includes("sucesso") ? "notice" : "error"}" style="margin-bottom:10px">${state.terrenoMessage}</div>` : ""}
+        <div class="btn-row">
+          <button class="btn green" onclick="saveTerrenoLocal()">Salvar terreno</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function terrenosView() {
+  if (!state.terrenoTema) {
+    return `
+      <div class="view">
+        <div class="page-header">
+          <div class="top-breadcrumb">
+            <button class="nav-btn" onclick="setView('home')">← Home</button>
+            <span class="crumb">Terrenos</span>
+          </div>
+        </div>
+        <div class="container">
+          <div class="card-grid-2 bottom">
+            <div class="section">
+              <div class="section-head head-primary">Terrenos</div>
+              <div class="section-body">
+                <p class="muted" style="margin-bottom:14px">Selecione um tema para abrir a visualização em mapa.</p>
+                ${TERRENO_TEMAS.map(group => `
+                  <div class="terreno-group">
+                    <h4>${group.group}</h4>
+                    <div class="btn-row">
+                      ${group.items.map(item => `<button class="btn blue" onclick="setTerrenoTema('${item}')">${item}</button>`).join("")}
+                    </div>
+                  </div>
+                `).join("")}
+              </div>
+            </div>
+            ${terrenoCadastroForm()}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  const terrenosTema = state.terrenos.filter((t) => t.tema === state.terrenoTema);
+  const filtered = terrenosTema.filter((t) => {
+    const q = state.terrenoSearch.trim().toLowerCase();
+    if (!q) return true;
+    const txt = `${t.nome} ${t.cidade || ""} ${t.estado || ""}`.toLowerCase();
+    return txt.includes(q);
+  });
+  const selected = filtered.find((t) => t.id === state.terrenoSelecionadoId) || filtered[0] || null;
+  if (!state.terrenoSelecionadoId && selected) {
+    state.terrenoSelecionadoId = selected.id;
+  }
+  return `
     <div class="view">
       <div class="page-header">
         <div class="top-breadcrumb">
-          <button class="nav-btn" onclick="setView('home')">← Home</button>
-          <span class="crumb">Cadastrar Terrenos</span>
+          <button class="nav-btn" onclick="setTerrenoTema(null)">← Terrenos</button>
+          <span class="crumb">${state.terrenoTema}</span>
         </div>
       </div>
 
       <div class="container">
-        <div class="card-grid-2">
+        <div class="terrenos-layout">
           <div class="section">
-            <div class="section-head head-primary">Novo terreno</div>
+            <div class="section-head head-primary">Áreas cadastradas (${filtered.length})</div>
             <div class="section-body">
               <div class="field">
-                <label>Nome do terreno</label>
+                <label>Pesquisar</label>
                 <div class="input-wrap full">
-                  <input class="inp text" type="text" value="${f.nome}"
-                    oninput="setTerrenoField('nome',this.value)" placeholder="Ex: Gleba Santa Clara" />
+                  <input class="inp text" type="text" value="${state.terrenoSearch}" oninput="setTerrenoSearch(this.value)"
+                    placeholder="Buscar terreno por nome/cidade..." />
                 </div>
               </div>
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
@@ -2103,14 +2305,13 @@ function terrenosView() {
         </div>
       </div>
 
-      ${globalOverlays()}
     </div>
   `;
 }
 
 function openTerrenoPicker() {
   if (state.terrenos.length === 0) {
-    state.sheetMessage = "Nenhum terreno cadastrado. Acesse 'Cadastrar Terrenos' na home para adicionar.";
+    state.sheetMessage = "Nenhum terreno cadastrado. Acesse 'Terrenos' na home para adicionar.";
     rerender();
     return;
   }
@@ -2129,10 +2330,7 @@ function selectTerrenoForStudy(id) {
   const t = state.terrenos.find((x) => x.id === id);
   if (!t) return;
   if (t.cidade) state.study.cidade = t.cidade;
-  if (!state.study.urban.areaTotal && t.areaGleba) state.study.urban.areaTotal = t.areaGleba;
-  if (!state.study.urban.percApp && t.areaApp && t.areaGleba) {
-    state.study.urban.percApp = Math.round((t.areaApp / t.areaGleba) * 100 * 100) / 100;
-  }
+  if (t.areaGleba) state.study.urban.areaTotal = t.areaGleba;
   state.sheetMessage = `Terreno "${t.nome}" aplicado ao estudo.`;
   state.showTerrenoPickerModal = false;
   rerender();
@@ -2148,7 +2346,7 @@ function terrenoPickerModal() {
           ${state.terrenos.map(t => `
             <button class="study-item" onclick="selectTerrenoForStudy('${t.id}')">
               <strong>${t.nome}</strong>
-              <span>${t.cidade}${t.estado ? " · " + t.estado : ""} · Gleba: ${fmt(t.areaGleba)} m² · APP: ${fmt(t.areaApp)} m²</span>
+              <span>${t.cidade}${t.estado ? " · " + t.estado : ""} · Gleba: ${fmt(t.areaGleba)} m²${t.tema ? " · Tema: " + t.tema : ""}</span>
             </button>
           `).join("")}
         </div>
@@ -2190,9 +2388,14 @@ function bootApp() {
   window.closeFeedback = closeFeedback;
   window.submitFeedback = submitFeedback;
   window.setTerrenoField = setTerrenoField;
-  window.handleFotoUpload = handleFotoUpload;
+  window.handleKmlUpload = handleKmlUpload;
+  window.handleTerrenoBoardUpload = handleTerrenoBoardUpload;
+  window.clearTerrenoBoardImage = clearTerrenoBoardImage;
   window.saveTerrenoLocal = saveTerrenoLocal;
   window.removeTerrenoLocal = removeTerrenoLocal;
+  window.setTerrenoTema = setTerrenoTema;
+  window.setTerrenoSearch = setTerrenoSearch;
+  window.selectTerrenoMapa = selectTerrenoMapa;
   window.openTerrenoPicker = openTerrenoPicker;
   window.closeTerrenoPicker = closeTerrenoPicker;
   window.selectTerrenoForStudy = selectTerrenoForStudy;
