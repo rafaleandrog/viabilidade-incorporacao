@@ -1953,6 +1953,24 @@ function handleTerrenoBoardUpload(input) {
   reader.readAsDataURL(file);
 }
 
+function clearTerrenoBoardImage() {
+  state.terrenoForm.quadroImagem = "";
+  state.terrenoForm.quadroImagemNome = "";
+  rerender();
+}
+
+function handleFotoUpload(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    state.terrenoForm.fotoBase64 = String(reader.result || "");
+    state.terrenoForm.fotoNome = file.name;
+    rerender();
+  };
+  reader.readAsDataURL(file);
+}
+
 function handleKmlUpload(input) {
   const file = input.files[0];
   if (!file) return;
@@ -2218,87 +2236,27 @@ function terrenosView() {
                     placeholder="Buscar terreno por nome/cidade..." />
                 </div>
               </div>
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
-                <div class="field">
-                  <label>Projeto</label>
-                  <div class="input-wrap full">
-                    <input class="inp text" type="text" value="${f.projeto}"
-                      oninput="setTerrenoField('projeto',this.value)" placeholder="Ex: Residencial Bela Vista" />
-                  </div>
-                </div>
-                <div class="field">
-                  <label>Etapa</label>
-                  <div class="input-wrap full">
-                    <input class="inp" type="text" inputmode="numeric" value="${f.etapa}"
-                      oninput="setTerrenoField('etapa',this.value.replace(/\\D/g,''))" placeholder="Ex: 1" />
-                  </div>
-                </div>
-              </div>
-              <div style="display:grid;grid-template-columns:1fr .6fr;gap:14px">
-                <div class="field">
-                  <label>Cidade</label>
-                  <div class="input-wrap full">
-                    <input class="inp text" type="text" value="${f.cidade}"
-                      oninput="setTerrenoField('cidade',this.value)" />
-                  </div>
-                </div>
-                <div class="field">
-                  <label>Estado (UF)</label>
-                  <div class="input-wrap full">
-                    <select class="inp" onchange="setTerrenoField('estado',this.value)" style="cursor:pointer">
-                      <option value="">—</option>
-                      ${UF_LIST.map(uf => `<option value="${uf}"${f.estado === uf ? " selected" : ""}>${uf}</option>`).join("")}
-                    </select>
-                  </div>
-                </div>
-              </div>
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
-                <div class="field">
-                  <label>Área da gleba</label>
-                  <div class="input-wrap full">
-                    <input class="inp" type="text" inputmode="decimal"
-                      value="${f.areaGleba || ""}"
-                      oninput="setTerrenoField('areaGleba',parseFloat(this.value.replace(/\\./g,'').replace(',','.'))||0)" />
-                    <span class="affix">m²</span>
-                  </div>
-                </div>
-                <div class="field">
-                  <label>APP (Preservação Ambiental)</label>
-                  <div class="input-wrap full">
-                    <input class="inp" type="text" inputmode="decimal"
-                      value="${f.areaApp || ""}"
-                      oninput="setTerrenoField('areaApp',parseFloat(this.value.replace(/\\./g,'').replace(',','.'))||0)" />
-                    <span class="affix">m²</span>
-                  </div>
-                </div>
-              </div>
-              <div class="field">
-                <label>Foto da gleba</label>
-                <input type="file" accept="image/*" class="terreno-file-input"
-                  onchange="handleFotoUpload(this)" />
-                ${f.fotoBase64 ? `<div class="terreno-preview"><img class="terreno-thumb-large" src="${f.fotoBase64}" alt="${f.fotoNome}" /></div>` : ""}
-              </div>
-              <div class="field">
-                <label>Arquivo KML do terreno</label>
-                <input type="file" accept=".kml" class="terreno-file-input"
-                  onchange="handleKmlUpload(this)" />
-                ${f.kmlNome ? `<div class="muted" style="font-size:12px;margin-top:4px">📎 ${f.kmlNome}</div>` : ""}
-              </div>
-              ${state.terrenoMessage ? `<div class="${state.terrenoMessage.startsWith("Salvo") || state.terrenoMessage.includes("sucesso") ? "notice" : "error"}" style="margin-bottom:10px">${state.terrenoMessage}</div>` : ""}
-              <div class="btn-row">
-                <button class="btn green" onclick="saveTerrenoLocal()">Salvar terreno</button>
-              </div>
+              ${filtered.length === 0
+                ? `<div class="muted">Nenhum terreno encontrado para este tema.</div>`
+                : `<div class="terreno-cards-grid">
+                    ${filtered.map((t) => `
+                      <button class="study-item" style="text-align:left" onclick="selectTerrenoMapa('${t.id}')">
+                        <strong>${t.nome}</strong>
+                        <span>${t.cidade || "—"}${t.estado ? " · " + t.estado : ""}${t.projeto ? " · " + t.projeto : ""}</span>
+                      </button>
+                    `).join("")}
+                  </div>`
+              }
             </div>
           </div>
 
           <div>
             <div class="section">
-              <div class="section-head head-orange">Terrenos cadastrados (${state.terrenos.length})</div>
+              <div class="section-head head-orange">Mapa do terreno</div>
               <div class="section-body">
-                ${state.terrenos.length === 0
-                  ? `<div class="muted">Nenhum terreno cadastrado ainda.</div>`
-                  : `<div class="terreno-cards-grid">${cards}</div>`
-                }
+                ${selected
+                  ? `<iframe class="terreno-iframe" src="${terrenoMapUrl(selected)}" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>`
+                  : `<div class="muted">Selecione um terreno para visualizar no mapa.</div>`}
               </div>
             </div>
           </div>
@@ -2389,6 +2347,7 @@ function bootApp() {
   window.submitFeedback = submitFeedback;
   window.setTerrenoField = setTerrenoField;
   window.handleKmlUpload = handleKmlUpload;
+  window.handleFotoUpload = handleFotoUpload;
   window.handleTerrenoBoardUpload = handleTerrenoBoardUpload;
   window.clearTerrenoBoardImage = clearTerrenoBoardImage;
   window.saveTerrenoLocal = saveTerrenoLocal;
