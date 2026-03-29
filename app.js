@@ -1,4 +1,6 @@
-const APPS_SCRIPT_URL = "https://script.google.com/a/macros/up.bsb.br/s/AKfycbwZ9itEkqLp9QWPn5NK1olS9j9FLrGrIdVpnXIszbDL7Wv_pWL4zxBrMRlUz1MqcHq-pw/exec";
+// Use sempre a URL pública de Web App do Apps Script (sem /a/macros/<dominio>/)
+// para permitir chamadas a partir do GitHub Pages sem dependência de sessão Google.
+const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwZ9itEkqLp9QWPn5NK1olS9j9FLrGrIdVpnXIszbDL7Wv_pWL4zxBrMRlUz1MqcHq-pw/exec";
 
 const STORAGE_KEYS = {
   benchmarks: "viab_benchmarks_v1",
@@ -1011,21 +1013,31 @@ async function postToAppsScript(action, payload) {
   if (!APPS_SCRIPT_URL || APPS_SCRIPT_URL.includes("COLE_AQUI")) {
     throw new Error("A URL do Apps Script ainda não foi configurada.");
   }
-  // mode: no-cors evita o erro CORS ao enviar para Apps Script
-  // credentials: include envia os cookies de autenticação do Google Workspace
-  // A resposta é opaca (no-cors) — não é possível ler o corpo ou o status
-  await fetch(APPS_SCRIPT_URL, {
-    method: "POST",
-    mode: "no-cors",
-    credentials: "include",
-    headers: { "Content-Type": "text/plain;charset=utf-8" },
-    body: JSON.stringify({ action, payload }),
-  });
+  let response;
+  try {
+    response = await fetch(APPS_SCRIPT_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ action, payload }),
+    });
+  } catch (error) {
+    throw new Error("Falha de rede ao salvar no Apps Script. Verifique a URL publicada e a implantação do Web App.");
+  }
 
-  return {
-    ok: true,
-    message: "Requisição enviada ao Apps Script."
-  };
+  if (!response.ok) {
+    throw new Error(`Falha HTTP ${response.status} ao salvar no Apps Script.`);
+  }
+
+  const raw = await response.text();
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed.ok) {
+      throw new Error(parsed.message || "Apps Script retornou erro ao salvar.");
+    }
+    return parsed;
+  } catch {
+    throw new Error(`Resposta inválida do Apps Script: ${raw.slice(0, 160)}`);
+  }
 }
 
 async function getFromAppsScript(action, params = {}) {
@@ -1036,7 +1048,12 @@ async function getFromAppsScript(action, params = {}) {
   const query = new URLSearchParams({ action, ...params }).toString();
   const url = `${APPS_SCRIPT_URL}?${query}`;
 
-  const response = await fetch(url, { credentials: "include" });
+  let response;
+  try {
+    response = await fetch(url);
+  } catch (error) {
+    throw new Error("Falha de rede ao consultar o Apps Script. Verifique se a URL é pública e se o deploy está ativo.");
+  }
 
   if (!response.ok) {
     throw new Error(`Falha HTTP ${response.status}`);
