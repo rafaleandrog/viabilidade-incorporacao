@@ -800,6 +800,46 @@ input[type=number]{-moz-appearance:textfield}
   font-size:13px;
   color:var(--muted);
 }
+.terreno-board{
+  border:1px solid var(--border);
+  border-radius:12px;
+  background:#fbfdff;
+  padding:12px;
+  display:grid;
+  gap:10px;
+}
+.terreno-board-upload-input{display:none}
+.terreno-board-dropzone{
+  min-height:170px;
+  border:1.5px dashed #a8c1cd;
+  border-radius:10px;
+  background:#f3f9fc;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  text-align:center;
+  padding:12px;
+  color:var(--muted);
+  cursor:pointer;
+}
+.terreno-board-dropzone strong{
+  display:block;
+  color:var(--primary);
+  margin-bottom:4px;
+}
+.terreno-board-dropzone span{
+  font-size:12px;
+}
+.terreno-board-image{
+  max-width:100%;
+  max-height:210px;
+  border-radius:8px;
+  object-fit:cover;
+  border:1px solid var(--border);
+}
+.terreno-board-notes{
+  min-height:120px;
+}
 .terreno-preview{
   margin-top:8px;
 }

@@ -5,7 +5,7 @@ const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwZ9itEkqLp9QWP
 const STORAGE_KEYS = {
   benchmarks: "viab_benchmarks_v1",
   scenarios: "viab_scenarios_v1",
-  terrenos: "viab_terrenos_v2",
+  terrenos: "viab_terrenos_v3",
 };
 
 const PROJECT_TYPES = [
@@ -92,9 +92,9 @@ const state = {
       precoM2: 0,
     },
     costs: {
-      infraMode: "m2",
-      infraM2: 30,
-      infraPct: 0,
+      infraMode: "pct",
+      infraM2: 0,
+      infraPct: 30,
       projetoMode: "R$",
       projetoR: 0,
       projetoPct: 0,
@@ -123,7 +123,7 @@ const state = {
   savedScenarios: loadLocal(STORAGE_KEYS.scenarios, []),
   benchmarks: loadLocal(STORAGE_KEYS.benchmarks, BENCHMARK_TEMPLATE),
   terrenos: loadLocal(STORAGE_KEYS.terrenos, []),
-  terrenoForm: { nome: "", cidade: "", estado: "", areaGleba: 0, kmlNome: "" },
+  terrenoForm: { nome: "", cidade: "", estado: "", areaGleba: 0, kmlNome: "", tema: "", quadroImagem: "", quadroImagemNome: "", quadroNotas: "" },
   terrenoTema: null,
   terrenoSearch: "",
   terrenoSelecionadoId: null,
@@ -222,9 +222,9 @@ function getDefaultStudy() {
       precoM2: 0,
     },
     costs: {
-      infraMode: "m2",
-      infraM2: 30,
-      infraPct: 0,
+      infraMode: "pct",
+      infraM2: 0,
+      infraPct: 30,
       projetoMode: "R$",
       projetoR: 0,
       projetoPct: 0,
@@ -254,13 +254,22 @@ function getDefaultStudy() {
 function normalizeLoadedStudy(payload) {
   const base = getDefaultStudy();
   const loaded = payload && payload.study ? payload.study : {};
+  const loadedCosts = { ...(loaded.costs || {}) };
+  const seemsOldInfraDefault = loadedCosts.infraMode === "m2"
+    && num(loadedCosts.infraM2) === 30
+    && num(loadedCosts.infraPct) === 0;
+  if (!("infraMode" in loadedCosts) || seemsOldInfraDefault) {
+    loadedCosts.infraMode = "pct";
+    loadedCosts.infraPct = 30;
+    loadedCosts.infraM2 = 0;
+  }
 
   return {
     ...base,
     ...loaded,
     urban: { ...base.urban, ...(loaded.urban || {}) },
     product: { ...base.product, ...(loaded.product || {}) },
-    costs: { ...base.costs, ...(loaded.costs || {}) },
+    costs: { ...base.costs, ...loadedCosts },
   };
 }
 
@@ -723,7 +732,7 @@ function loteamentoView() {
           <div class="section-body">
             <div style="display:grid;grid-template-columns:1.1fr 1fr 1.5fr 0.7fr;gap:14px;margin-bottom:14px">
               ${modeField("Infraestrutura", "costs.infraMode",
-                [{id:"m2", label:"R$/m²lot."}, {id:"pct", label:"% VGV"}],
+                [{id:"pct", label:"% VGV"}, {id:"m2", label:"R$/m²lot."}],
                 {
                   m2:  { path:"costs.infraM2",  value: state.study.costs.infraM2,  prefix:"R$", suffix:"/m²lot." },
                   pct: { path:"costs.infraPct",  value: state.study.costs.infraPct,  suffix:"%VGV" }
@@ -1763,9 +1772,9 @@ function newStudy() {
       precoM2: 0,
     },
     costs: {
-      infraMode: "m2",
-      infraM2: 30,
-      infraPct: 0,
+      infraMode: "pct",
+      infraM2: 0,
+      infraPct: 30,
       projetoMode: "R$",
       projetoR: 0,
       projetoPct: 0,
@@ -1831,9 +1840,10 @@ function attachEvents() {
     el.addEventListener("blur", (e) => {
       const path = e.target.getAttribute("data-path");
       const isText = e.target.getAttribute("data-text") === "true";
+      const isInteger = e.target.getAttribute("data-integer") === "true";
       if (!isText) {
         const val = getNestedValue(path);
-        e.target.value = fmtBR(val);
+        e.target.value = isInteger ? fmt(val, 0) : fmtBR(val);
       }
       _activePath = null;
       _activeRaw = "";
@@ -1851,7 +1861,7 @@ function attachEvents() {
       } else {
         const raw = e.target.value.replace(/\./g, "").replace(",", ".");
         const parsed = num(raw);
-        setNested(path, isInteger ? Math.round(parsed) : parsed);
+        setNested(path, isInteger ? Math.trunc(parsed) : parsed);
       }
     });
   });
@@ -1921,10 +1931,33 @@ function handleKmlUpload(input) {
   rerender();
 }
 
+function handleTerrenoBoardUpload(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    state.terrenoForm.quadroImagem = String(reader.result || "");
+    state.terrenoForm.quadroImagemNome = file.name;
+    rerender();
+  };
+  reader.readAsDataURL(file);
+}
+
+function clearTerrenoBoardImage() {
+  state.terrenoForm.quadroImagem = "";
+  state.terrenoForm.quadroImagemNome = "";
+  rerender();
+}
+
 async function saveTerrenoLocal() {
   const f = state.terrenoForm;
   if (!f.nome.trim()) {
     state.terrenoMessage = "Informe o nome do terreno antes de salvar.";
+    rerender();
+    return;
+  }
+  if (!f.tema) {
+    state.terrenoMessage = "Selecione o tema do terreno antes de salvar.";
     rerender();
     return;
   }
@@ -1935,8 +1968,11 @@ async function saveTerrenoLocal() {
     cidade: f.cidade.trim(),
     estado: f.estado,
     areaGleba: f.areaGleba,
-    tema: state.terrenoTema,
+    tema: f.tema,
     kmlNome: f.kmlNome,
+    quadroImagem: f.quadroImagem || "",
+    quadroImagemNome: f.quadroImagemNome || "",
+    quadroNotas: (f.quadroNotas || "").trim(),
   };
   state.terrenos.push(t);
   saveLocal(STORAGE_KEYS.terrenos, state.terrenos);
@@ -1947,7 +1983,7 @@ async function saveTerrenoLocal() {
     state.terrenoMessage = "Salvo localmente. Erro ao enviar para a planilha: " + err.message;
   }
 
-  state.terrenoForm = { nome: "", cidade: "", estado: "", areaGleba: 0, kmlNome: "" };
+  state.terrenoForm = { nome: "", cidade: "", estado: "", areaGleba: 0, kmlNome: "", tema: "", quadroImagem: "", quadroImagemNome: "", quadroNotas: "" };
   rerender();
 }
 
@@ -1982,6 +2018,84 @@ function terrenoMapUrl(terreno) {
   return `https://www.google.com/maps?q=${encodeURIComponent(q)}&output=embed`;
 }
 
+function terrenoCadastroForm() {
+  const f = state.terrenoForm;
+  return `
+    <div class="section">
+      <div class="section-head head-blue">Cadastro único de terreno</div>
+      <div class="section-body">
+        <div class="field">
+          <label>Tema</label>
+          <div class="input-wrap full">
+            <select class="inp" onchange="setTerrenoField('tema',this.value)" style="cursor:pointer">
+              <option value="">Selecione…</option>
+              ${TERRENO_TEMAS.flatMap(group => group.items).map(item => `<option value="${item}"${f.tema === item ? " selected" : ""}>${item}</option>`).join("")}
+            </select>
+          </div>
+        </div>
+        <div class="field">
+          <label>Nome</label>
+          <div class="input-wrap full">
+            <input class="inp text" type="text" value="${f.nome}"
+              oninput="setTerrenoField('nome',this.value)" placeholder="Ex: Gleba Santa Clara" />
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr .6fr;gap:14px">
+          <div class="field">
+            <label>Cidade</label>
+            <div class="input-wrap full">
+              <input class="inp text" type="text" value="${f.cidade}" oninput="setTerrenoField('cidade',this.value)" />
+            </div>
+          </div>
+          <div class="field">
+            <label>Estado (UF)</label>
+            <div class="input-wrap full">
+              <select class="inp" onchange="setTerrenoField('estado',this.value)" style="cursor:pointer">
+                <option value="">—</option>
+                ${UF_LIST.map(uf => `<option value="${uf}"${f.estado === uf ? " selected" : ""}>${uf}</option>`).join("")}
+              </select>
+            </div>
+          </div>
+        </div>
+        <div class="field">
+          <label>Área da gleba</label>
+          <div class="input-wrap full">
+            <input class="inp" type="text" inputmode="decimal"
+              value="${f.areaGleba || ""}"
+              oninput="setTerrenoField('areaGleba',parseFloat(this.value.replace(/\\./g,'').replace(',','.'))||0)" />
+            <span class="affix">m²</span>
+          </div>
+        </div>
+        <div class="field">
+          <label>Arquivo KML</label>
+          <input type="file" accept=".kml,.kmz,application/vnd.google-earth.kml+xml,application/vnd.google-earth.kmz" class="terreno-file-input"
+            onchange="handleKmlUpload(this)" />
+          ${f.kmlNome ? `<div class="muted" style="margin-top:4px">Arquivo selecionado: ${f.kmlNome}</div>` : ""}
+        </div>
+        <div class="field">
+          <label>Quadro visual (imagem + notas)</label>
+          <div class="terreno-board">
+            <div class="terreno-board-media">
+              <input id="terreno-board-upload" type="file" accept="image/*" class="terreno-board-upload-input" onchange="handleTerrenoBoardUpload(this)" />
+              <label for="terreno-board-upload" class="terreno-board-dropzone">
+                ${f.quadroImagem
+                  ? `<img src="${f.quadroImagem}" alt="Prévia do quadro do terreno" class="terreno-board-image" />`
+                  : `<div><strong>Adicionar imagem do terreno</strong><span>Arraste ou clique para carregar uma referência visual (Notion/Trello style).</span></div>`}
+              </label>
+              ${f.quadroImagem ? `<div class="btn-row" style="margin-top:8px"><button class="btn gray" type="button" onclick="clearTerrenoBoardImage()">Remover imagem</button></div>` : ""}
+            </div>
+            <textarea class="feedback-text terreno-board-notes" placeholder="Anotações do quadro visual, checklist, ideias de produto, etc." oninput="setTerrenoField('quadroNotas',this.value)">${f.quadroNotas || ""}</textarea>
+          </div>
+        </div>
+        ${state.terrenoMessage ? `<div class="${state.terrenoMessage.startsWith("Salvo") || state.terrenoMessage.includes("sucesso") ? "notice" : "error"}" style="margin-bottom:10px">${state.terrenoMessage}</div>` : ""}
+        <div class="btn-row">
+          <button class="btn green" onclick="saveTerrenoLocal()">Salvar terreno</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 function terrenosView() {
   if (!state.terrenoTema) {
     return `
@@ -1993,26 +2107,28 @@ function terrenosView() {
           </div>
         </div>
         <div class="container">
-          <div class="section">
-            <div class="section-head head-primary">Terrenos</div>
-            <div class="section-body">
-              <p class="muted" style="margin-bottom:14px">Selecione um tema para abrir o cadastro e visualização em mapa.</p>
-              ${TERRENO_TEMAS.map(group => `
-                <div class="terreno-group">
-                  <h4>${group.group}</h4>
-                  <div class="btn-row">
-                    ${group.items.map(item => `<button class="btn blue" onclick="setTerrenoTema('${item}')">${item}</button>`).join("")}
+          <div class="card-grid-2 bottom">
+            <div class="section">
+              <div class="section-head head-primary">Terrenos</div>
+              <div class="section-body">
+                <p class="muted" style="margin-bottom:14px">Selecione um tema para abrir a visualização em mapa.</p>
+                ${TERRENO_TEMAS.map(group => `
+                  <div class="terreno-group">
+                    <h4>${group.group}</h4>
+                    <div class="btn-row">
+                      ${group.items.map(item => `<button class="btn blue" onclick="setTerrenoTema('${item}')">${item}</button>`).join("")}
+                    </div>
                   </div>
-                </div>
-              `).join("")}
+                `).join("")}
+              </div>
             </div>
+            ${terrenoCadastroForm()}
           </div>
         </div>
       </div>
     `;
   }
 
-  const f = state.terrenoForm;
   const terrenosTema = state.terrenos.filter((t) => t.tema === state.terrenoTema);
   const filtered = terrenosTema.filter((t) => {
     const q = state.terrenoSearch.trim().toLowerCase();
@@ -2050,59 +2166,10 @@ function terrenosView() {
                   filtered.map(t => `
                     <button class="study-item${selected && selected.id === t.id ? " terreno-selected" : ""}" onclick="selectTerrenoMapa('${t.id}')">
                       <strong>${t.nome}</strong>
-                      <span>${t.cidade}${t.estado ? " · " + t.estado : ""} · Gleba: ${fmt(t.areaGleba)} m² ${t.kmlNome ? "· KML: " + t.kmlNome : ""}</span>
+                      <span>${t.cidade}${t.estado ? " · " + t.estado : ""} · Gleba: ${fmt(t.areaGleba)} m² ${t.kmlNome ? "· KML: " + t.kmlNome : ""}${t.quadroImagem ? " · com quadro visual" : ""}</span>
                     </button>
                   `).join("")
                 }
-              </div>
-              <div class="spacer"></div>
-              <div class="section" style="box-shadow:none">
-                <div class="section-head head-blue">Novo terreno</div>
-                <div class="section-body">
-                  <div class="field">
-                    <label>Nome</label>
-                    <div class="input-wrap full">
-                      <input class="inp text" type="text" value="${f.nome}"
-                        oninput="setTerrenoField('nome',this.value)" placeholder="Ex: Gleba Santa Clara" />
-                    </div>
-                  </div>
-                  <div style="display:grid;grid-template-columns:1fr .6fr;gap:14px">
-                    <div class="field">
-                      <label>Cidade</label>
-                      <div class="input-wrap full">
-                        <input class="inp text" type="text" value="${f.cidade}" oninput="setTerrenoField('cidade',this.value)" />
-                      </div>
-                    </div>
-                    <div class="field">
-                      <label>Estado (UF)</label>
-                      <div class="input-wrap full">
-                        <select class="inp" onchange="setTerrenoField('estado',this.value)" style="cursor:pointer">
-                          <option value="">—</option>
-                          ${UF_LIST.map(uf => `<option value="${uf}"${f.estado === uf ? " selected" : ""}>${uf}</option>`).join("")}
-                        </select>
-                      </div>
-                    </div>
-                  </div>
-                  <div class="field">
-                    <label>Área da gleba</label>
-                    <div class="input-wrap full">
-                      <input class="inp" type="text" inputmode="decimal"
-                        value="${f.areaGleba || ""}"
-                        oninput="setTerrenoField('areaGleba',parseFloat(this.value.replace(/\\./g,'').replace(',','.'))||0)" />
-                      <span class="affix">m²</span>
-                    </div>
-                  </div>
-                  <div class="field">
-                    <label>Arquivo KML</label>
-                    <input type="file" accept=".kml,.kmz,application/vnd.google-earth.kml+xml,application/vnd.google-earth.kmz" class="terreno-file-input"
-                      onchange="handleKmlUpload(this)" />
-                    ${f.kmlNome ? `<div class="muted" style="margin-top:4px">Arquivo selecionado: ${f.kmlNome}</div>` : ""}
-                  </div>
-                  ${state.terrenoMessage ? `<div class="${state.terrenoMessage.startsWith("Salvo") || state.terrenoMessage.includes("sucesso") ? "notice" : "error"}" style="margin-bottom:10px">${state.terrenoMessage}</div>` : ""}
-                  <div class="btn-row">
-                    <button class="btn green" onclick="saveTerrenoLocal()">Salvar terreno</button>
-                  </div>
-                </div>
               </div>
             </div>
           </div>
@@ -2111,8 +2178,13 @@ function terrenosView() {
             <div class="section-head head-orange">Mapa</div>
             <div class="section-body">
               <iframe class="terreno-map" src="${terrenoMapUrl(selected)}" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
+              ${selected && selected.quadroImagem ? `
+                <div class="terreno-preview">
+                  <img class="terreno-thumb-large" src="${selected.quadroImagem}" alt="Quadro visual do terreno ${selected.nome}" />
+                </div>
+              ` : ""}
               <div class="muted" style="margin-top:8px">
-                ${selected ? `Visualizando: ${selected.nome}${selected.kmlNome ? ` · Arquivo KML: ${selected.kmlNome}` : ""}` : "Sem seleção de terreno."}
+                ${selected ? `Visualizando: ${selected.nome}${selected.kmlNome ? ` · Arquivo KML: ${selected.kmlNome}` : ""}${selected.quadroNotas ? ` · Notas: ${selected.quadroNotas}` : ""}` : "Sem seleção de terreno."}
               </div>
             </div>
           </div>
@@ -2144,7 +2216,7 @@ function selectTerrenoForStudy(id) {
   const t = state.terrenos.find((x) => x.id === id);
   if (!t) return;
   if (t.cidade) state.study.cidade = t.cidade;
-  if (!state.study.urban.areaTotal && t.areaGleba) state.study.urban.areaTotal = t.areaGleba;
+  if (t.areaGleba) state.study.urban.areaTotal = t.areaGleba;
   state.sheetMessage = `Terreno "${t.nome}" aplicado ao estudo.`;
   state.showTerrenoPickerModal = false;
   rerender();
@@ -2203,6 +2275,8 @@ function bootApp() {
   window.submitFeedback = submitFeedback;
   window.setTerrenoField = setTerrenoField;
   window.handleKmlUpload = handleKmlUpload;
+  window.handleTerrenoBoardUpload = handleTerrenoBoardUpload;
+  window.clearTerrenoBoardImage = clearTerrenoBoardImage;
   window.saveTerrenoLocal = saveTerrenoLocal;
   window.removeTerrenoLocal = removeTerrenoLocal;
   window.setTerrenoTema = setTerrenoTema;
