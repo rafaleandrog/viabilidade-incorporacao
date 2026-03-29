@@ -122,11 +122,8 @@ const state = {
   calc: null,
   savedScenarios: loadLocal(STORAGE_KEYS.scenarios, []),
   benchmarks: loadLocal(STORAGE_KEYS.benchmarks, BENCHMARK_TEMPLATE),
-  terrenos: loadLocal(STORAGE_KEYS.terrenos, []),
-  terrenoForm: { nome: "", cidade: "", estado: "", areaGleba: 0, kmlNome: "", tema: "", quadroImagem: "", quadroImagemNome: "", quadroNotas: "" },
-  terrenoTema: null,
-  terrenoSearch: "",
-  terrenoSelecionadoId: null,
+  terrenos: loadLocal("viab_terrenos", []),
+  terrenoForm: { nome: "", cidade: "", estado: "", projeto: "", etapa: "", areaGleba: 0, areaApp: 0, fotoBase64: "", fotoNome: "", kmlBase64: "", kmlNome: "" },
   terrenoMessage: "",
   showTerrenoPickerModal: false,
 };
@@ -730,7 +727,7 @@ function loteamentoView() {
         <div class="section" style="margin-top:12px">
           <div class="section-head head-orange">4. Estrutura de custos</div>
           <div class="section-body">
-            <div style="display:grid;grid-template-columns:1.1fr 1fr 1.5fr 0.7fr;gap:14px;margin-bottom:14px">
+            <div style="display:grid;grid-template-columns:1.2fr 1fr 1fr 1fr;gap:14px;margin-bottom:14px">
               ${modeField("Infraestrutura", "costs.infraMode",
                 [{id:"pct", label:"% VGV"}, {id:"m2", label:"R$/m²lot."}],
                 {
@@ -965,6 +962,8 @@ function variationBox(a, b) {
   const rowsB = summaryRows(b.calc);
 
   return `
+    <div class="muted" style="visibility:hidden">&nbsp;<br>&nbsp;</div>
+    <div class="spacer"></div>
     <table class="compare-table">
       <tbody>
         ${rowsA.map((row, idx) => `
@@ -1510,7 +1509,7 @@ async function exportExcel() {
   wsResumo.getCell("A2").alignment = { horizontal: "center", vertical: "middle" };
   wsResumo.getRow(2).height = 22;
 
-  applySectionHeader(wsResumo.getCell("A4"), "IDENTIFICAÇÃO", "0B5C6B");
+  applySectionHeader(wsResumo.getCell("A4"), "IDENTIFICACAO", "0B5C6B");
   wsResumo.mergeCells("A4:F4");
 
   const identificacao = [
@@ -1530,7 +1529,7 @@ async function exportExcel() {
     row++;
   });
 
-  applySectionHeader(wsResumo.getCell("H4"), "INDICADORES URBANÍSTICOS", "C8752A");
+  applySectionHeader(wsResumo.getCell("H4"), "INDICADORES URBANISTICOS", "C8752A");
   wsResumo.mergeCells("H4:L4");
 
   const urb = [
@@ -1605,30 +1604,33 @@ async function exportExcel() {
   });
 
   const proformaRows = [
-    ["Receita bruta (VGV)", c.vgvBruto, 100],
-    ["Corretagem", -c.corretagemR, pctOf(c.corretagemR, c.vgvBruto)],
-    ["Marketing e vendas", -c.marketingR, pctOf(c.marketingR, c.vgvBruto)],
-    ["Receita líquida", c.receitaLiquida, c.margemLiquidaPct],
-    ["Pagamento do terreno", -c.terrenoR, pctOf(c.terrenoR, c.vgvBruto)],
-    ["Custo obras total", -c.custoObrasTotal, c.custoObrasPct],
-    ["Infraestrutura", -c.infraR, pctOf(c.infraR, c.vgvBruto)],
-    ["Projetos", -c.projetoFinalR, pctOf(c.projetoFinalR, c.vgvBruto)],
-    ["Licenciamento", -c.licenciamentoFinalR, pctOf(c.licenciamentoFinalR, c.vgvBruto)],
-    ["Registro", -c.registroR, pctOf(c.registroR, c.vgvBruto)],
-    ["Manutenção pós-obra", -c.manutPosR, pctOf(c.manutPosR, c.vgvBruto)],
-    ["Resultado operacional", c.resultadoOperacional, c.margemOperacionalPct],
-    ["Impostos sobre vendas", -c.impostosR, pctOf(c.impostosR, c.vgvBruto)],
-    ["Administração e gestão", -c.adminR, pctOf(c.adminR, c.vgvBruto)],
-    ["Resultado final", c.resultadoFinal, c.margemFinalPct],
+    { label: `VGV Potencial (${fmt(c.areaTotalLotes, 0)} m\u00b2)`, v: c.vgvPotencial, pct: c.vgvPotencialPctSobreBruto },
+    ...(c.permutaFisicaR > 0 ? [{ label: "(-) Permuta fisica", v: -c.permutaFisicaR, pct: c.permutaFisicaPctSobreBruto }] : []),
+    { label: "Receita bruta (VGV)", v: c.vgvBruto, pct: 100 },
+    { label: "(-) Impostos", v: -c.impostosR, pct: pctOf(c.impostosR, c.vgvBruto) },
+    { label: "(-) Corretagem", v: -c.corretagemR, pct: pctOf(c.corretagemR, c.vgvBruto) },
+    { label: "(-) Marketing e vendas", v: -c.marketingR, pct: pctOf(c.marketingR, c.vgvBruto) },
+    { label: "= Receita liquida", v: c.receitaLiquida, pct: c.margemLiquidaPct },
+    { label: "(-) Pagamento do terreno", v: -c.terrenoR, pct: pctOf(c.terrenoR, c.vgvBruto) },
+    { label: "(-) Infraestrutura", v: -c.infraR, pct: pctOf(c.infraR, c.vgvBruto) },
+    { label: "(-) Projetos", v: -c.projetoFinalR, pct: pctOf(c.projetoFinalR, c.vgvBruto) },
+    { label: "(-) Licenciamento e Custos Ambientais", v: -c.licenciamentoFinalR, pct: pctOf(c.licenciamentoFinalR, c.vgvBruto) },
+    { label: "(-) Registro", v: -c.registroR, pct: pctOf(c.registroR, c.vgvBruto) },
+    { label: "(-) Manutencao pos-obra", v: -c.manutPosR, pct: pctOf(c.manutPosR, c.vgvBruto) },
+    { label: "(-) Contingencias", v: -c.contingenciasR, pct: pctOf(c.contingenciasR, c.vgvBruto) },
+    { label: "= Resultado operacional", v: c.resultadoOperacional, pct: c.margemOperacionalPct },
+    { label: "(-) Permuta financeira", v: -c.permFinR, pct: pctOf(c.permFinR, c.vgvBruto) },
+    { label: "(-) Administracao e gestao de carteira", v: -c.adminR, pct: pctOf(c.adminR, c.vgvBruto) },
+    { label: "= Resultado final", v: c.resultadoFinal, pct: c.margemFinalPct },
   ];
 
   let proformaStart = 5;
-  proformaRows.forEach(([label, v1, v2, v3, kind], i) => {
+  proformaRows.forEach((row, i) => {
     const r = wsProforma.getRow(proformaStart + i);
-    r.getCell(1).value = label;
-    r.getCell(2).value = v1;
-    r.getCell(3).value = v2;
-    r.getCell(4).value = v3;
+    r.getCell(1).value = row.label;
+    r.getCell(2).value = row.v;
+    r.getCell(3).value = c.areaLiquidaVenda ? row.v / c.areaLiquidaVenda : 0;
+    r.getCell(4).value = (row.pct || 0) / 100;
 
     r.getCell(2).numFmt = moneyFmt;
     r.getCell(3).numFmt = moneyFmt;
@@ -1638,12 +1640,12 @@ async function exportExcel() {
     let fontColor = "111827";
     let bold = false;
 
-    if (kind === "header") { fill = "EAF4EA"; bold = true; }
-    if (kind === "deduct") { fill = "FCE7E7"; }
-    if (kind === "main") { fill = "DDEFF2"; bold = true; }
-    if (kind === "expense") { fill = "F9FAFB"; }
-    if (kind === "subtotal") { fill = "D9EEF7"; bold = true; }
-    if (kind === "result") { fill = "DDF4D7"; bold = true; fontColor = "166534"; }
+    const lbl = row.label;
+    if (lbl.startsWith("=")) { fill = "DDF4D7"; bold = true; fontColor = "166534"; }
+    else if (lbl.startsWith("(-) Permuta") || lbl.startsWith("(-) Admin") || lbl.startsWith("(-) Impostos") || lbl.startsWith("(-) Corretagem") || lbl.startsWith("(-) Marketing")) { fill = "FCE7E7"; }
+    else if (lbl.startsWith("(-) Pagamento") || lbl.startsWith("(-) Infra") || lbl.startsWith("(-) Proj") || lbl.startsWith("(-) Licen") || lbl.startsWith("(-) Regist") || lbl.startsWith("(-) Manut") || lbl.startsWith("(-) Cont")) { fill = "F9FAFB"; }
+    else if (lbl.includes("VGV Potencial") || lbl.includes("Receita bruta")) { fill = "DDEFF2"; bold = true; }
+    else if (lbl.includes("Permuta fisica")) { fill = "FCE7E7"; }
 
     for (let col = 1; col <= 4; col++) {
       const cell = r.getCell(col);
@@ -1682,32 +1684,33 @@ async function exportExcel() {
 
   const premissas = [
     ["Nome do estudo", nomeEstudo, ""],
-    ["Cidade / referência", cidade, ""],
-    ["Área total da gleba", state.study.urban.areaTotal, "m²"],
+    ["Cidade / referencia", cidade, ""],
+    ["Area total da gleba", state.study.urban.areaTotal, "m2"],
     ["APP", state.study.urban.percApp, "%"],
-    ["Área remanescente", state.study.urban.percRem, "%"],
-    ["Área não edificante", state.study.urban.percNaoEd, "%"],
-    ["Áreas institucionais", state.study.urban.percInst, "%"],
-    ["Áreas públicas", state.study.urban.percPubl, "%"],
-    ["Sistema viário", state.study.urban.percViario, "%"],
-    ["Número de lotes", state.study.product.nLotes, "un"],
-    ["Área média do lote", state.study.product.areaMedia, "m²"],
-    ["Preço por m²", state.study.product.precoM2, "R$/m²"],
-    ["Permuta física", state.study.costs.permFisicaPct, "%"],
+    ["Area remanescente", state.study.urban.percRem, "%"],
+    ["Area nao edificante", state.study.urban.percNaoEd, "%"],
+    ["Areas institucionais", state.study.urban.percInst, "%"],
+    ["Areas publicas", state.study.urban.percPubl, "%"],
+    ["Sistema viario", state.study.urban.percViario, "%"],
+    ["Numero de lotes", state.study.product.nLotes, "un"],
+    ["Area media do lote", state.study.product.areaMedia, "m2"],
+    ["Preco por m2", state.study.product.precoM2, "R$/m2"],
+    ["Permuta fisica", state.study.costs.permFisicaPct, "%"],
     ["Permuta financeira", state.study.costs.permFinPct, "%"],
-    ["Terreno", state.study.costs.terrenoM2, "R$/m²"],
-    ["Infraestrutura", state.study.costs.infraM2, "R$/m²"],
-    ["Projeto e licenciamento", state.study.costs.projetoR, "R$"],
+    ["Terreno", state.study.costs.terrenoM2, "R$/m2"],
+    ["Infraestrutura", state.study.costs.infraMode === "pct" ? state.study.costs.infraPct : state.study.costs.infraM2, state.study.costs.infraMode === "pct" ? "% VGV" : "R$/m2lot."],
+    ["Modo infra", state.study.costs.infraMode, ""],
+    ["Projetos", state.study.costs.projetoR, "R$"],
+    ["Modo projetos", state.study.costs.projetoMode, ""],
+    ["Licenciamento e Custos Ambientais", state.study.costs.licenciamentoR, "R$"],
+    ["Modo licenciamento", state.study.costs.licenciamentoMode, ""],
     ["Registro", state.study.costs.registroR, "R$"],
-    ["Manutenção", state.study.costs.manutPosPct, "%"],
+    ["Manutencao", state.study.costs.manutPosPct, "%"],
     ["Marketing", state.study.costs.marketingPct, "%"],
     ["Corretagem", state.study.costs.corretagemPct, "%"],
-    ["Administração", state.study.costs.adminPct, "%"],
+    ["Administracao", state.study.costs.adminPct, "%"],
     ["Impostos vendas", state.study.costs.impostosPct, "%"],
-    ["House comercial", state.study.costs.houseMes, "R$/mês"],
-    ["Corretores", state.study.costs.houseCorretores, "un"],
-    ["Meses", state.study.costs.houseMeses, "meses"],
-    ["Contingências", state.study.costs.contingenciasPct, "%"]
+    ["Contingencias", state.study.costs.contingenciasPct, "%"]
   ];
 
   let premRow = 3;
@@ -1893,6 +1896,13 @@ function rerender() {
   root.innerHTML = render();
   attachEvents();
 
+  // Init Leaflet maps for terrain cards with KML
+  if (state.view === "terrenos") {
+    requestAnimationFrame(() => {
+      state.terrenos.forEach(t => { if (t.kmlBase64) initTerrainMap(t); });
+    });
+  }
+
   window.scrollTo(0, scrollY);
   if (savedPath) {
     const el = document.querySelector(`[data-path="${savedPath}"]`);
@@ -1943,10 +1953,33 @@ function handleTerrenoBoardUpload(input) {
   reader.readAsDataURL(file);
 }
 
-function clearTerrenoBoardImage() {
-  state.terrenoForm.quadroImagem = "";
-  state.terrenoForm.quadroImagemNome = "";
-  rerender();
+function handleKmlUpload(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    state.terrenoForm.kmlBase64 = e.target.result;
+    state.terrenoForm.kmlNome = file.name;
+    rerender();
+  };
+  reader.readAsDataURL(file);
+}
+
+function initTerrainMap(terreno) {
+  const el = document.getElementById("map-" + terreno.id);
+  if (!el || el._mapInit) return;
+  el._mapInit = true;
+  const map = L.map(el, { zoomControl: true });
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    attribution: "© OpenStreetMap contributors",
+    maxZoom: 19,
+  }).addTo(map);
+  const kmlLayer = omnivore.kml.parse(atob(terreno.kmlBase64.split(",")[1]));
+  kmlLayer.addTo(map);
+  kmlLayer.on("ready", () => {
+    const bounds = kmlLayer.getBounds();
+    if (bounds.isValid()) map.fitBounds(bounds);
+  });
 }
 
 async function saveTerrenoLocal() {
@@ -1956,34 +1989,37 @@ async function saveTerrenoLocal() {
     rerender();
     return;
   }
-  if (!f.tema) {
-    state.terrenoMessage = "Selecione o tema do terreno antes de salvar.";
-    rerender();
-    return;
-  }
+  // Colunas enviadas ao Google Sheets (aba "terrenos"):
+  // id, createdAt, nome, cidade, estado, projeto, etapa, areaGleba, areaApp, kmlNome
+  // fotoBase64 e kmlBase64 ficam apenas no localStorage
   const t = {
     id: generateTerrenoId(),
     createdAt: new Date().toISOString(),
     nome: f.nome.trim(),
     cidade: f.cidade.trim(),
     estado: f.estado,
+    projeto: f.projeto.trim(),
+    etapa: f.etapa,
     areaGleba: f.areaGleba,
-    tema: f.tema,
+    areaApp: f.areaApp,
+    fotoBase64: f.fotoBase64,
+    fotoNome: f.fotoNome,
+    kmlBase64: f.kmlBase64,
     kmlNome: f.kmlNome,
-    quadroImagem: f.quadroImagem || "",
-    quadroImagemNome: f.quadroImagemNome || "",
-    quadroNotas: (f.quadroNotas || "").trim(),
   };
   state.terrenos.push(t);
-  saveLocal(STORAGE_KEYS.terrenos, state.terrenos);
+  saveLocal("viab_terrenos", state.terrenos);
+
+  // Envia para Sheets sem foto/kml (campos grandes demais para célula)
   try {
-    await postToAppsScript("saveTerrain", { ...t, targetSheet: "terrenos" });
-    state.terrenoMessage = "Terreno salvo com sucesso na aba 'terrenos' da planilha.";
+    const { fotoBase64: _foto, kmlBase64: _kml, ...semBinarios } = t;
+    await postToAppsScript("saveTerrain", semBinarios);
+    state.terrenoMessage = "Terreno salvo com sucesso.";
   } catch (err) {
     state.terrenoMessage = "Salvo localmente. Erro ao enviar para a planilha: " + err.message;
   }
 
-  state.terrenoForm = { nome: "", cidade: "", estado: "", areaGleba: 0, kmlNome: "", tema: "", quadroImagem: "", quadroImagemNome: "", quadroNotas: "" };
+  state.terrenoForm = { nome: "", cidade: "", estado: "", projeto: "", etapa: "", areaGleba: 0, areaApp: 0, fotoBase64: "", fotoNome: "", kmlBase64: "", kmlNome: "" };
   rerender();
 }
 
@@ -2020,6 +2056,27 @@ function terrenoMapUrl(terreno) {
 
 function terrenoCadastroForm() {
   const f = state.terrenoForm;
+  const cards = state.terrenos.map(t => `
+    <div class="terreno-card">
+      <div class="terreno-card-img">
+        ${t.fotoBase64
+          ? `<img src="${t.fotoBase64}" alt="${t.nome}" />`
+          : `<div class="terreno-card-no-img">📍</div>`}
+      </div>
+      <div class="terreno-card-body">
+        <div class="terreno-card-title">${t.nome}</div>
+        <div class="terreno-card-sub">${t.cidade}${t.estado ? " · " + t.estado : ""}${t.projeto ? " · " + t.projeto : ""}</div>
+        <div class="terreno-card-meta">
+          <span>Gleba: ${fmt(t.areaGleba, 0)} m²</span>
+          <span>APP: ${fmt(t.areaApp, 0)} m²</span>
+          ${t.etapa ? `<span>Etapa ${t.etapa}</span>` : ""}
+        </div>
+        ${t.kmlBase64 ? `<div id="map-${t.id}" class="terreno-card-map"></div>` : ""}
+      </div>
+      <button class="terreno-card-del" onclick="removeTerrenoLocal('${t.id}')" title="Remover">✕</button>
+    </div>
+  `).join("");
+
   return `
     <div class="section">
       <div class="section-head head-blue">Cadastro único de terreno</div>
@@ -2161,30 +2218,87 @@ function terrenosView() {
                     placeholder="Buscar terreno por nome/cidade..." />
                 </div>
               </div>
-              <div class="terreno-list">
-                ${filtered.length === 0 ? `<div class="muted">Nenhum terreno encontrado neste tema.</div>` :
-                  filtered.map(t => `
-                    <button class="study-item${selected && selected.id === t.id ? " terreno-selected" : ""}" onclick="selectTerrenoMapa('${t.id}')">
-                      <strong>${t.nome}</strong>
-                      <span>${t.cidade}${t.estado ? " · " + t.estado : ""} · Gleba: ${fmt(t.areaGleba)} m² ${t.kmlNome ? "· KML: " + t.kmlNome : ""}${t.quadroImagem ? " · com quadro visual" : ""}</span>
-                    </button>
-                  `).join("")
-                }
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+                <div class="field">
+                  <label>Projeto</label>
+                  <div class="input-wrap full">
+                    <input class="inp text" type="text" value="${f.projeto}"
+                      oninput="setTerrenoField('projeto',this.value)" placeholder="Ex: Residencial Bela Vista" />
+                  </div>
+                </div>
+                <div class="field">
+                  <label>Etapa</label>
+                  <div class="input-wrap full">
+                    <input class="inp" type="text" inputmode="numeric" value="${f.etapa}"
+                      oninput="setTerrenoField('etapa',this.value.replace(/\\D/g,''))" placeholder="Ex: 1" />
+                  </div>
+                </div>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr .6fr;gap:14px">
+                <div class="field">
+                  <label>Cidade</label>
+                  <div class="input-wrap full">
+                    <input class="inp text" type="text" value="${f.cidade}"
+                      oninput="setTerrenoField('cidade',this.value)" />
+                  </div>
+                </div>
+                <div class="field">
+                  <label>Estado (UF)</label>
+                  <div class="input-wrap full">
+                    <select class="inp" onchange="setTerrenoField('estado',this.value)" style="cursor:pointer">
+                      <option value="">—</option>
+                      ${UF_LIST.map(uf => `<option value="${uf}"${f.estado === uf ? " selected" : ""}>${uf}</option>`).join("")}
+                    </select>
+                  </div>
+                </div>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+                <div class="field">
+                  <label>Área da gleba</label>
+                  <div class="input-wrap full">
+                    <input class="inp" type="text" inputmode="decimal"
+                      value="${f.areaGleba || ""}"
+                      oninput="setTerrenoField('areaGleba',parseFloat(this.value.replace(/\\./g,'').replace(',','.'))||0)" />
+                    <span class="affix">m²</span>
+                  </div>
+                </div>
+                <div class="field">
+                  <label>APP (Preservação Ambiental)</label>
+                  <div class="input-wrap full">
+                    <input class="inp" type="text" inputmode="decimal"
+                      value="${f.areaApp || ""}"
+                      oninput="setTerrenoField('areaApp',parseFloat(this.value.replace(/\\./g,'').replace(',','.'))||0)" />
+                    <span class="affix">m²</span>
+                  </div>
+                </div>
+              </div>
+              <div class="field">
+                <label>Foto da gleba</label>
+                <input type="file" accept="image/*" class="terreno-file-input"
+                  onchange="handleFotoUpload(this)" />
+                ${f.fotoBase64 ? `<div class="terreno-preview"><img class="terreno-thumb-large" src="${f.fotoBase64}" alt="${f.fotoNome}" /></div>` : ""}
+              </div>
+              <div class="field">
+                <label>Arquivo KML do terreno</label>
+                <input type="file" accept=".kml" class="terreno-file-input"
+                  onchange="handleKmlUpload(this)" />
+                ${f.kmlNome ? `<div class="muted" style="font-size:12px;margin-top:4px">📎 ${f.kmlNome}</div>` : ""}
+              </div>
+              ${state.terrenoMessage ? `<div class="${state.terrenoMessage.startsWith("Salvo") || state.terrenoMessage.includes("sucesso") ? "notice" : "error"}" style="margin-bottom:10px">${state.terrenoMessage}</div>` : ""}
+              <div class="btn-row">
+                <button class="btn green" onclick="saveTerrenoLocal()">Salvar terreno</button>
               </div>
             </div>
           </div>
 
-          <div class="section">
-            <div class="section-head head-orange">Mapa</div>
-            <div class="section-body">
-              <iframe class="terreno-map" src="${terrenoMapUrl(selected)}" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
-              ${selected && selected.quadroImagem ? `
-                <div class="terreno-preview">
-                  <img class="terreno-thumb-large" src="${selected.quadroImagem}" alt="Quadro visual do terreno ${selected.nome}" />
-                </div>
-              ` : ""}
-              <div class="muted" style="margin-top:8px">
-                ${selected ? `Visualizando: ${selected.nome}${selected.kmlNome ? ` · Arquivo KML: ${selected.kmlNome}` : ""}${selected.quadroNotas ? ` · Notas: ${selected.quadroNotas}` : ""}` : "Sem seleção de terreno."}
+          <div>
+            <div class="section">
+              <div class="section-head head-orange">Terrenos cadastrados (${state.terrenos.length})</div>
+              <div class="section-body">
+                ${state.terrenos.length === 0
+                  ? `<div class="muted">Nenhum terreno cadastrado ainda.</div>`
+                  : `<div class="terreno-cards-grid">${cards}</div>`
+                }
               </div>
             </div>
           </div>
