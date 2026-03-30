@@ -172,7 +172,12 @@ function deltaPct(base, value) {
 }
 
 function safeId(txt) {
-  return (txt || "").replace(/[^\w\-]+/g, "_");
+  return (txt || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^A-Za-z0-9_-]+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "");
 }
 
 let _activePath = null;
@@ -337,12 +342,13 @@ function compute(study) {
   // Após resultado operacional: admin, permuta financeira (base ajustável)
   const adminR = vgvBruto * num(c.adminPct) / 100;
   const permFinBrutoR = vgvBruto * num(c.permFinPct) / 100;
-  let permFinReducaoR = 0;
-  if (c.permFinExcImpostos)   permFinReducaoR += impostosR;
-  if (c.permFinExcCorretagem) permFinReducaoR += corretagemR;
-  if (c.permFinExcMarketing)  permFinReducaoR += marketingR;
-  if (c.permFinExcAdmin)      permFinReducaoR += adminR;
-  const permFinR = Math.max(0, permFinBrutoR - permFinReducaoR);
+  let basePermFinPctReducao = 0;
+  if (c.permFinExcImpostos)   basePermFinPctReducao += num(c.impostosPct);
+  if (c.permFinExcCorretagem) basePermFinPctReducao += num(c.corretagemPct);
+  if (c.permFinExcMarketing)  basePermFinPctReducao += num(c.marketingPct);
+  if (c.permFinExcAdmin)      basePermFinPctReducao += num(c.adminPct);
+  const basePermFinFator = Math.max(0, 1 - (basePermFinPctReducao / 100));
+  const permFinR = permFinBrutoR * basePermFinFator;
   const resultadoFinal = resultadoOperacional - permFinR - adminR;
 
   const custoTotal = terrenoR + custoObrasTotal + impostosR + adminR + corretagemR + marketingR + permFinR + contingenciasR;
@@ -386,6 +392,7 @@ function compute(study) {
     manutPosR,
     custoObrasTotal,
     resultadoOperacional,
+    permFinBrutoR,
     permFinR,
     contingenciasR,
     adminR,
@@ -728,7 +735,7 @@ function loteamentoView() {
               ${calcDisplay("Preço médio do lote", rs(c.ticketMedio))}
               ${calcDisplay("Custo aquisição terreno", rs(c.terrenoR))}
               ${calcDisplay("Área entregue — perm. física", `${fmt(c.areaPermutaFis)} m²`)}
-              ${calcDisplay("Valor bruto perm. financeira", rs(c.permFinR))}
+              ${calcDisplay("Valor líquido perm. financeira", rs(c.permFinR))}
               <div></div>
               <div></div>
             </div>
@@ -740,7 +747,7 @@ function loteamentoView() {
           <div class="section-body">
             <div style="display:grid;grid-template-columns:1.2fr 1fr 1fr 1fr;gap:14px;margin-bottom:14px">
               ${modeField("Infraestrutura", "costs.infraMode",
-                [{id:"pct", label:"% VGV"}, {id:"m2", label:"R$/m²lot."}],
+                [{id:"m2", label:"R$/m²lot."}, {id:"pct", label:"% VGV"}],
                 {
                   m2:  { path:"costs.infraM2",  value: state.study.costs.infraM2,  prefix:"R$", suffix:"/m²lot." },
                   pct: { path:"costs.infraPct",  value: state.study.costs.infraPct,  suffix:"%VGV" }
@@ -946,7 +953,7 @@ function comparisonView() {
 function scenarioBox(item) {
   if (!item) return `<div class="muted">Ainda não há cenário salvo.</div>`;
   return `
-    <div class="muted"><strong>${item.study.nomeEstudo || "Sem nome"}</strong><br>${new Date(item.savedAt).toLocaleString("pt-BR")}</div>
+    <div class="compare-head muted"><strong>${item.study.nomeEstudo || "Sem nome"}</strong><br>${new Date(item.savedAt).toLocaleString("pt-BR")}</div>
     <div class="spacer"></div>
     <table class="compare-table">
       <tbody>
@@ -967,7 +974,7 @@ function variationBox(a, b) {
   const rowsB = summaryRows(b.calc);
 
   return `
-    <div class="muted" style="visibility:hidden">&nbsp;<br>&nbsp;</div>
+    <div class="compare-head muted"><strong>Base: Cenário A</strong><br>Comparado com Cenário B</div>
     <div class="spacer"></div>
     <table class="compare-table">
       <tbody>
@@ -1356,7 +1363,7 @@ async function exportExcel() {
   wb.modified = new Date();
   wb.company = "UP";
   wb.subject = "Estudo de viabilidade";
-  wb.title = state.study.nomeEstudo || "Viabilidade Loteamento";
+  wb.title = safeId(state.study.nomeEstudo || "Viabilidade_Loteamento");
 
   const nomeEstudo = state.study.nomeEstudo || "Sem nome";
   const cidade = state.study.cidade || "-";
@@ -1610,7 +1617,7 @@ async function exportExcel() {
 
   const proformaRows = [
     { label: `VGV Potencial (${fmt(c.areaTotalLotes, 0)} m\u00b2)`, v: c.vgvPotencial, pct: c.vgvPotencialPctSobreBruto },
-    ...(c.permutaFisicaR > 0 ? [{ label: "(-) Permuta fisica", v: -c.permutaFisicaR, pct: c.permutaFisicaPctSobreBruto }] : []),
+    ...(c.permutaFisicaR > 0 ? [{ label: `(-) Permuta fisica (${fmt(c.areaPermutaFis, 0)} m2)`, v: -c.permutaFisicaR, pct: c.permutaFisicaPctSobreBruto }] : []),
     { label: "Receita bruta (VGV)", v: c.vgvBruto, pct: 100 },
     { label: "(-) Impostos", v: -c.impostosR, pct: pctOf(c.impostosR, c.vgvBruto) },
     { label: "(-) Corretagem", v: -c.corretagemR, pct: pctOf(c.corretagemR, c.vgvBruto) },
@@ -1705,11 +1712,12 @@ async function exportExcel() {
     ["Terreno", state.study.costs.terrenoM2, "R$/m2"],
     ["Infraestrutura", state.study.costs.infraMode === "pct" ? state.study.costs.infraPct : state.study.costs.infraM2, state.study.costs.infraMode === "pct" ? "% VGV" : "R$/m2lot."],
     ["Modo infra", state.study.costs.infraMode, ""],
-    ["Projetos", state.study.costs.projetoR, "R$"],
+    ["Projetos", state.study.costs.projetoMode === "pct" ? state.study.costs.projetoPct : state.study.costs.projetoR, state.study.costs.projetoMode === "pct" ? "% VGV" : "R$"],
     ["Modo projetos", state.study.costs.projetoMode, ""],
-    ["Licenciamento e Custos Ambientais", state.study.costs.licenciamentoR, "R$"],
+    ["Licenciamento e Custos Ambientais", state.study.costs.licenciamentoMode === "pct" ? state.study.costs.licenciamentoPct : state.study.costs.licenciamentoR, state.study.costs.licenciamentoMode === "pct" ? "% VGV" : "R$"],
     ["Modo licenciamento", state.study.costs.licenciamentoMode, ""],
-    ["Registro", state.study.costs.registroR, "R$"],
+    ["Registro", state.study.costs.registroMode === "pct" ? state.study.costs.registroPct : state.study.costs.registroR, state.study.costs.registroMode === "pct" ? "% VGV" : "R$"],
+    ["Modo registro", state.study.costs.registroMode, ""],
     ["Manutencao", state.study.costs.manutPosPct, "%"],
     ["Marketing", state.study.costs.marketingPct, "%"],
     ["Corretagem", state.study.costs.corretagemPct, "%"],
@@ -1971,8 +1979,8 @@ function handleTerrenoBoardUpload(input) {
   if (!file) return;
   const reader = new FileReader();
   reader.onload = () => {
-    state.terrenoForm.quadroImagem = String(reader.result || "");
-    state.terrenoForm.quadroImagemNome = file.name;
+    state.terrenoForm.fotoBase64 = String(reader.result || "");
+    state.terrenoForm.fotoNome = file.name;
     rerender();
   };
   reader.readAsDataURL(file);
@@ -2051,13 +2059,6 @@ function selectTerrenoMapa(id) {
   rerender();
 }
 
-function terrenoMapUrl(terreno) {
-  const q = terreno
-    ? `${terreno.nome} ${terreno.cidade || ""} ${terreno.estado || ""}`.trim()
-    : "Brasil";
-  return `https://www.google.com/maps?q=${encodeURIComponent(q)}&output=embed`;
-}
-
 function terrenoCadastroForm() {
   const f = state.terrenoForm;
   const cards = state.terrenos.map(t => `
@@ -2085,12 +2086,18 @@ function terrenoCadastroForm() {
       <div class="section-head head-blue">Cadastro único de terreno</div>
       <div class="section-body">
         <div class="field">
-          <label>Tema</label>
+          <label>Projeto</label>
           <div class="input-wrap full">
-            <select class="inp" onchange="setTerrenoField('tema',this.value)" style="cursor:pointer">
+            <select class="inp" onchange="setTerrenoField('projeto',this.value)" style="cursor:pointer">
               <option value="">Selecione…</option>
-              ${TERRENO_TEMAS.flatMap(group => group.items).map(item => `<option value="${item}"${f.tema === item ? " selected" : ""}>${item}</option>`).join("")}
+              ${TERRENO_TEMAS.flatMap(group => group.items).map(item => `<option value="${item}"${f.projeto === item ? " selected" : ""}>${item}</option>`).join("")}
             </select>
+          </div>
+        </div>
+        <div class="field">
+          <label>Etapa</label>
+          <div class="input-wrap full">
+            <input class="inp" type="number" min="0" step="1" value="${f.etapa || ""}" oninput="setTerrenoField('etapa',this.value.replace(/\\D/g,''))" />
           </div>
         </div>
         <div class="field">
@@ -2168,7 +2175,7 @@ function terrenosView() {
             <div class="section">
               <div class="section-head head-primary">Terrenos</div>
               <div class="section-body">
-                <p class="muted" style="margin-bottom:14px">Selecione um tema para abrir a visualização em mapa.</p>
+                <p class="muted" style="margin-bottom:14px">Selecione um projeto para abrir a visualização em mapa.</p>
                 ${TERRENO_TEMAS.map(group => `
                   <div class="terreno-group">
                     <h4>${group.group}</h4>
@@ -2186,7 +2193,7 @@ function terrenosView() {
     `;
   }
 
-  const terrenosTema = state.terrenos.filter((t) => t.tema === state.terrenoTema);
+  const terrenosTema = state.terrenos.filter((t) => t.projeto === state.terrenoTema);
   const filtered = terrenosTema.filter((t) => {
     const q = state.terrenoSearch.trim().toLowerCase();
     if (!q) return true;
@@ -2287,12 +2294,9 @@ function terrenosView() {
 
           <div>
             <div class="section">
-              <div class="section-head head-orange">Terrenos cadastrados (${state.terrenos.length})</div>
+              <div class="section-head head-orange">Mapa do terreno</div>
               <div class="section-body">
-                ${state.terrenos.length === 0
-                  ? `<div class="muted">Nenhum terreno cadastrado ainda.</div>`
-                  : `<div class="terreno-cards-grid">${cards}</div>`
-                }
+                <div id="terreno-project-map" class="terreno-map"></div>
               </div>
             </div>
           </div>
@@ -2340,7 +2344,7 @@ function terrenoPickerModal() {
           ${state.terrenos.map(t => `
             <button class="study-item" onclick="selectTerrenoForStudy('${t.id}')">
               <strong>${t.nome}</strong>
-              <span>${t.cidade}${t.estado ? " · " + t.estado : ""} · Gleba: ${fmt(t.areaGleba)} m²${t.tema ? " · Tema: " + t.tema : ""}</span>
+              <span>${t.cidade}${t.estado ? " · " + t.estado : ""} · Gleba: ${fmt(t.areaGleba)} m²${t.projeto ? " · Projeto: " + t.projeto : ""}</span>
             </button>
           `).join("")}
         </div>

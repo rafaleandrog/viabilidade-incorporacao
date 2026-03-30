@@ -445,9 +445,13 @@ input[type=number]{-moz-appearance:textfield}
 .compare-box h4{
   margin-bottom:10px;
 }
+.compare-head{
+  min-height:34px;
+}
 .compare-table{
   width:100%;
   border-collapse:collapse;
+  table-layout:fixed;
 }
 .compare-table td,
 .compare-table th{
@@ -461,6 +465,7 @@ input[type=number]{-moz-appearance:textfield}
 }
 .compare-table td:last-child,
 .compare-table th:last-child{
+  width:40%;
   text-align:right;
   font-family:'JetBrains Mono',monospace;
 }
