@@ -124,7 +124,6 @@ const state = {
   terrenos: loadLocal(STORAGE_KEYS.terrenos, []),
   terrenoForm: { tema: "", nome: "", cidade: "", estado: "", projeto: "", etapa: "", areaGleba: 0, areaApp: 0, fotoBase64: "", fotoNome: "", quadroImagem: "", quadroImagemNome: "", quadroNotas: "", apeloNotas: {}, apeloDetalhes: {} },
   terrenoMessage: "",
-  terrenoSheetMessage: "",
   terrenoTema: null,
   terrenoSearch: "",
   terrenoSelecionadoId: null,
@@ -2012,8 +2011,18 @@ function rerender() {
     }
   })();
 
-  root.innerHTML = render();
-  attachEvents();
+  try {
+    root.innerHTML = render();
+    attachEvents();
+  } catch (error) {
+    console.error("Erro ao renderizar:", error);
+    root.innerHTML = `<div style="padding:24px;font-family:Arial,sans-serif">
+      <h2>Erro ao renderizar</h2>
+      <pre style="background:#f5f5f5;padding:12px;border-radius:8px;white-space:pre-wrap">${String(error && error.message ? error.message : error)}</pre>
+      <button onclick="location.reload()" style="margin-top:12px;padding:8px 16px;cursor:pointer">Recarregar</button>
+    </div>`;
+    return;
+  }
 
   window.scrollTo(0, scrollY);
   if (savedPath) {
@@ -2347,6 +2356,7 @@ function terrenosView() {
     `;
   }
 
+  const f = state.terrenoForm;
   const terrenosTema = state.terrenos.filter((t) => t.projeto === state.terrenoTema);
   const filtered = terrenosTema.filter((t) => {
     const q = state.terrenoSearch.trim().toLowerCase();
