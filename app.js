@@ -101,9 +101,7 @@ const state = {
       licenciamentoMode: "R$",
       licenciamentoR: 0,
       licenciamentoPct: 0,
-      registroMode: "R$",
       registroR: 0,
-      registroPct: 0,
       manutPosPct: 2,
       marketingPct: 2.5,
       corretagemPct: 5,
@@ -233,9 +231,7 @@ function getDefaultStudy() {
       licenciamentoMode: "R$",
       licenciamentoR: 0,
       licenciamentoPct: 0,
-      registroMode: "R$",
       registroR: 0,
-      registroPct: 0,
       manutPosPct: 2,
       marketingPct: 2.5,
       corretagemPct: 5,
@@ -336,9 +332,7 @@ function compute(study) {
   const licenciamentoFinalR = c.licenciamentoMode === "pct"
     ? vgvBruto * num(c.licenciamentoPct) / 100
     : num(c.licenciamentoR);
-  const registroR = c.registroMode === "pct"
-    ? vgvBruto * num(c.registroPct) / 100
-    : num(c.registroR);
+  const registroR = num(c.registroR);
   const manutPosR = infraR * num(c.manutPosPct) / 100;
 
   const custoObrasTotal = infraR + projetoFinalR + licenciamentoFinalR + registroR + manutPosR;
@@ -720,7 +714,24 @@ function loteamentoView() {
               ${inputField("Permuta financeira", "costs.permFinPct", state.study.costs.permFinPct, { suffix: "%", full: true })}
               ${inputField("Terreno", "costs.terrenoM2", state.study.costs.terrenoM2, { prefix: "R$", suffix: "/m² gleba", full: true })}
             </div>
-            <div style="display:grid;grid-template-columns:.65fr .9fr 1fr .65fr .8fr 1.2fr;gap:14px;margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+            ${(() => {
+              const ratio = c.areaLotesVend > 0 ? c.areaTotalLotes / c.areaLotesVend : 0;
+              const pct   = Math.min(ratio, 1) * 100;
+              const over  = ratio > 1;
+              return `
+                <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+                  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px">
+                    <span style="font-size:11px;font-weight:600;color:var(--muted)">Área total lotes vs. área vendável</span>
+                    <span style="font-size:11px;font-weight:700;color:${over ? '#dc2626' : 'var(--primary)'}">${fmt(c.areaTotalLotes,0)} m² / ${fmt(c.areaLotesVend,0)} m² (${fmt(ratio * 100, 1)}%)</span>
+                  </div>
+                  <div style="height:8px;background:#e5e7eb;border-radius:6px;overflow:hidden">
+                    <div style="height:100%;width:${pct}%;background:${over ? '#dc2626' : 'var(--primary)'};border-radius:6px;transition:width .3s"></div>
+                  </div>
+                  ${over ? `<div style="margin-top:6px;font-size:11px;color:#dc2626;font-weight:600">⚠ Área total dos lotes (${fmt(c.areaTotalLotes,0)} m²) excede a área vendável (${fmt(c.areaLotesVend,0)} m²). Reduza o número ou a área média dos lotes.</div>` : ""}
+                </div>
+              `;
+            })()}
+            <div style="display:grid;grid-template-columns:.65fr .9fr 1fr .65fr .8fr 1.2fr;gap:14px;margin-top:12px">
               ${calcDisplay("Preço médio do lote", rs(c.ticketMedio))}
               ${calcDisplay("Custo aquisição terreno", rs(c.terrenoR))}
               ${calcDisplay("Área entregue — perm. física", `${fmt(c.areaPermutaFis)} m²`)}
@@ -756,13 +767,7 @@ function loteamentoView() {
                   pct:  { path:"costs.licenciamentoPct",  value: state.study.costs.licenciamentoPct,  suffix:"%VGV" }
                 }
               )}
-              ${modeField("Registro", "costs.registroMode",
-                [{id:"R$", label:"R$"}, {id:"pct", label:"% VGV"}],
-                {
-                  "R$": { path:"costs.registroR",   value: state.study.costs.registroR,   prefix:"R$" },
-                  pct:  { path:"costs.registroPct", value: state.study.costs.registroPct, suffix:"%VGV" }
-                }
-              )}
+              ${inputField("Registro", "costs.registroR", state.study.costs.registroR, { prefix: "R$", full: true })}
             </div>
             <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:14px">
               ${inputField("Manutenção pós-obra", "costs.manutPosPct", state.study.costs.manutPosPct, { suffix: "%infra", full: true })}
@@ -1792,9 +1797,7 @@ function newStudy() {
       licenciamentoMode: "R$",
       licenciamentoR: 0,
       licenciamentoPct: 0,
-      registroMode: "R$",
       registroR: 0,
-      registroPct: 0,
       manutPosPct: 2,
       marketingPct: 2.5,
       corretagemPct: 5,
@@ -1877,6 +1880,39 @@ function attachEvents() {
     });
   });
 
+  document.querySelectorAll("[data-terreno-path]").forEach((el) => {
+    const isNum    = el.getAttribute("data-terreno-num")    === "true";
+    const isDigits = el.getAttribute("data-terreno-digits") === "true";
+    el.addEventListener("focus", (e) => {
+      _activePath = "terreno:" + e.target.getAttribute("data-terreno-path");
+      _activeRaw  = e.target.value;
+    });
+    el.addEventListener("blur", (e) => {
+      if (isNum) {
+        const key = e.target.getAttribute("data-terreno-path");
+        const v = state.terrenoForm[key];
+        e.target.value = v ? fmtBR(v) : "";
+      }
+      _activePath = null;
+      _activeRaw  = "";
+    });
+    el.addEventListener("input", (e) => {
+      const key = e.target.getAttribute("data-terreno-path");
+      _activePath = "terreno:" + key;
+      _activeRaw  = e.target.value;
+      if (isNum) {
+        state.terrenoForm[key] = parseFloat(e.target.value.replace(/\./g, "").replace(",", ".")) || 0;
+      } else if (isDigits) {
+        const cleaned = e.target.value.replace(/\D/g, "");
+        state.terrenoForm[key] = cleaned;
+        if (e.target.value !== cleaned) { e.target.value = cleaned; _activeRaw = cleaned; }
+      } else {
+        state.terrenoForm[key] = e.target.value;
+      }
+      rerender();
+    });
+  });
+
   document.querySelectorAll("[data-benchmark]").forEach((el) => {
     el.addEventListener("input", (e) => {
       const path = e.target.getAttribute("data-benchmark").split(".");
@@ -1917,7 +1953,10 @@ function rerender() {
 
   window.scrollTo(0, scrollY);
   if (savedPath) {
-    const el = document.querySelector(`[data-path="${savedPath}"]`);
+    let el = document.querySelector(`[data-path="${savedPath}"]`);
+    if (!el && savedPath.startsWith("terreno:")) {
+      el = document.querySelector(`[data-terreno-path="${savedPath.slice(8)}"]`);
+    }
     if (el) {
       el.focus();
       if (savedCursor !== null) {
@@ -2155,15 +2194,18 @@ function terrenoCadastroForm() {
         <div class="field">
           <label>Nome</label>
           <div class="input-wrap full">
-            <input class="inp text" type="text" value="${f.nome}"
-              oninput="setTerrenoField('nome',this.value)" placeholder="Ex: Gleba Santa Clara" />
+            <input class="inp text" type="text"
+              value="${_activePath === 'terreno:nome' ? _activeRaw : f.nome}"
+              data-terreno-path="nome" placeholder="Ex: Gleba Santa Clara" />
           </div>
         </div>
         <div style="display:grid;grid-template-columns:1fr .6fr;gap:14px">
           <div class="field">
             <label>Cidade</label>
             <div class="input-wrap full">
-              <input class="inp text" type="text" value="${f.cidade}" oninput="setTerrenoField('cidade',this.value)" />
+              <input class="inp text" type="text"
+                value="${_activePath === 'terreno:cidade' ? _activeRaw : f.cidade}"
+                data-terreno-path="cidade" />
             </div>
           </div>
           <div class="field">
@@ -2180,8 +2222,8 @@ function terrenoCadastroForm() {
           <label>Área da gleba</label>
           <div class="input-wrap full">
             <input class="inp" type="text" inputmode="decimal"
-              value="${f.areaGleba || ""}"
-              oninput="setTerrenoField('areaGleba',parseFloat(this.value.replace(/\\./g,'').replace(',','.'))||0)" />
+              value="${_activePath === 'terreno:areaGleba' ? _activeRaw : (f.areaGleba ? fmtBR(f.areaGleba) : '')}"
+              data-terreno-path="areaGleba" data-terreno-num="true" />
             <span class="affix">m²</span>
           </div>
         </div>
