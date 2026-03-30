@@ -120,8 +120,8 @@ const state = {
   calc: null,
   savedScenarios: loadLocal(STORAGE_KEYS.scenarios, []),
   benchmarks: loadLocal(STORAGE_KEYS.benchmarks, BENCHMARK_TEMPLATE),
-  terrenos: loadLocal("viab_terrenos", []),
-  terrenoForm: { nome: "", cidade: "", estado: "", projeto: "", etapa: "", areaGleba: 0, areaApp: 0, fotoBase64: "", fotoNome: "", quadroImagem: "", quadroImagemNome: "", quadroNotas: "", kmlBase64: "", kmlNome: "" },
+  terrenos: loadLocal(STORAGE_KEYS.terrenos, []),
+  terrenoForm: { nome: "", cidade: "", estado: "", projeto: "", etapa: "", areaGleba: 0, areaApp: 0, fotoBase64: "", fotoNome: "", quadroImagem: "", quadroImagemNome: "", quadroNotas: "" },
   terrenoMessage: "",
   showTerrenoPickerModal: false,
 };
@@ -1940,17 +1940,6 @@ function rerender() {
   root.innerHTML = render();
   attachEvents();
 
-  // Init Leaflet maps for terrain cards with KML
-  if (state.view === "terrenos") {
-    requestAnimationFrame(() => {
-      state.terrenos.forEach(t => { if (t.kmlBase64) initTerrainMap(t); });
-      if (state.terrenoTema) {
-        const terrenosProjeto = state.terrenos.filter((t) => t.projeto === state.terrenoTema);
-        initProjectMap(terrenosProjeto, state.terrenoSelecionadoId);
-      }
-    });
-  }
-
   window.scrollTo(0, scrollY);
   if (savedPath) {
     let el = document.querySelector(`[data-path="${savedPath}"]`);
@@ -1990,95 +1979,11 @@ function handleTerrenoBoardUpload(input) {
   if (!file) return;
   const reader = new FileReader();
   reader.onload = () => {
-    state.terrenoForm.quadroImagem = String(reader.result || "");
-    state.terrenoForm.quadroImagemNome = file.name;
-    rerender();
-  };
-  reader.readAsDataURL(file);
-}
-
-function clearTerrenoBoardImage() {
-  state.terrenoForm.quadroImagem = "";
-  state.terrenoForm.quadroImagemNome = "";
-  rerender();
-}
-
-function handleFotoUpload(input) {
-  const file = input.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = () => {
     state.terrenoForm.fotoBase64 = String(reader.result || "");
     state.terrenoForm.fotoNome = file.name;
     rerender();
   };
   reader.readAsDataURL(file);
-}
-
-function handleKmlUpload(input) {
-  const file = input.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = (e) => {
-    state.terrenoForm.kmlBase64 = e.target.result;
-    state.terrenoForm.kmlNome = file.name;
-    rerender();
-  };
-  reader.readAsDataURL(file);
-}
-
-function initTerrainMap(terreno) {
-  const el = document.getElementById("map-" + terreno.id);
-  if (!el || el._mapInit) return;
-  el._mapInit = true;
-  const map = L.map(el, { zoomControl: true });
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    attribution: "© OpenStreetMap contributors",
-    maxZoom: 19,
-  }).addTo(map);
-  const kmlLayer = omnivore.kml.parse(atob(terreno.kmlBase64.split(",")[1]));
-  kmlLayer.addTo(map);
-  kmlLayer.on("ready", () => {
-    const bounds = kmlLayer.getBounds();
-    if (bounds.isValid()) map.fitBounds(bounds);
-  });
-}
-
-function initProjectMap(terrenosProjeto = [], selectedId = null) {
-  const el = document.getElementById("terreno-project-map");
-  if (!el) return;
-  if (el._map) {
-    el._map.remove();
-    el._map = null;
-  }
-
-  const map = L.map(el, { zoomControl: true });
-  el._map = map;
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    attribution: "© OpenStreetMap contributors",
-    maxZoom: 19,
-  }).addTo(map);
-
-  const allBounds = [];
-  terrenosProjeto.forEach((terreno) => {
-    if (!terreno.kmlBase64) return;
-    const layer = omnivore.kml.parse(atob(terreno.kmlBase64.split(",")[1]));
-    layer.addTo(map);
-    layer.on("ready", () => {
-      const bounds = layer.getBounds();
-      if (bounds && bounds.isValid()) {
-        allBounds.push(bounds);
-        if (allBounds.length === terrenosProjeto.filter((t) => t.kmlBase64).length) {
-          const merged = allBounds.reduce((acc, b) => acc.extend(b), allBounds[0].clone());
-          map.fitBounds(merged.pad(0.08));
-        }
-      }
-    });
-  });
-
-  const selected = terrenosProjeto.find((t) => t.id === selectedId);
-  if (selected && selected.kmlBase64) return;
-  map.setView([-14.235, -51.9253], 4);
 }
 
 async function saveTerrenoLocal() {
@@ -2088,12 +1993,9 @@ async function saveTerrenoLocal() {
     rerender();
     return;
   }
-  // Colunas enviadas ao Google Sheets (aba "terrenos"):
-  // id, createdAt, nome, cidade, estado, projeto, etapa, areaGleba, areaApp, kmlNome, fotoNome, quadroImagemNome, quadroNotas
-  // fotoBase64 e kmlBase64 ficam apenas no localStorage
   const t = {
     id: generateTerrenoId(),
-    createdAt: new Date().toISOString(),
+    timestamp: new Date().toISOString(),
     nome: f.nome.trim(),
     cidade: f.cidade.trim(),
     estado: f.estado,
@@ -2103,25 +2005,33 @@ async function saveTerrenoLocal() {
     areaApp: f.areaApp,
     fotoBase64: f.fotoBase64,
     fotoNome: f.fotoNome,
-    quadroImagem: f.quadroImagem || "",
-    quadroImagemNome: f.quadroImagemNome || "",
-    quadroNotas: (f.quadroNotas || "").trim(),
-    kmlBase64: f.kmlBase64,
-    kmlNome: f.kmlNome,
+    quadroImagem: f.quadroImagem,
+    quadroNotas: f.quadroNotas,
   };
   state.terrenos.push(t);
-  saveLocal("viab_terrenos", state.terrenos);
+  saveLocal(STORAGE_KEYS.terrenos, state.terrenos);
 
-  // Envia para Sheets sem foto/kml (campos grandes demais para célula)
+  // Envia para Sheets — foto (base64) fica só no localStorage
   try {
-    const { fotoBase64: _foto, kmlBase64: _kml, quadroImagem: _quadroImagem, ...semBinarios } = t;
-    await postToAppsScript("saveTerrain", semBinarios);
+    await postToAppsScript("saveTerreno", {
+      id: t.id,
+      timestamp: t.timestamp,
+      nome: t.nome,
+      cidade: t.cidade,
+      uf: t.estado,
+      projeto: t.projeto,
+      etapa: t.etapa,
+      areaGleba: t.areaGleba,
+      quadroImagemUrl: "",
+      quadroNotas: t.quadroNotas,
+      status: "ativo",
+    });
     state.terrenoMessage = "Terreno salvo com sucesso.";
   } catch (err) {
     state.terrenoMessage = "Salvo localmente. Erro ao enviar para a planilha: " + err.message;
   }
 
-  state.terrenoForm = { nome: "", cidade: "", estado: "", projeto: "", etapa: "", areaGleba: 0, areaApp: 0, fotoBase64: "", fotoNome: "", quadroImagem: "", quadroImagemNome: "", quadroNotas: "", kmlBase64: "", kmlNome: "" };
+  state.terrenoForm = { nome: "", cidade: "", estado: "", projeto: "", etapa: "", areaGleba: 0, areaApp: 0, fotoBase64: "", fotoNome: "", quadroImagem: "", quadroImagemNome: "", quadroNotas: "" };
   rerender();
 }
 
@@ -2166,7 +2076,6 @@ function terrenoCadastroForm() {
           <span>APP: ${fmt(t.areaApp, 0)} m²</span>
           ${t.etapa ? `<span>Etapa ${t.etapa}</span>` : ""}
         </div>
-        ${t.kmlBase64 ? `<div id="map-${t.id}" class="terreno-card-map"></div>` : ""}
       </div>
       <button class="terreno-card-del" onclick="removeTerrenoLocal('${t.id}')" title="Remover">✕</button>
     </div>
@@ -2226,12 +2135,6 @@ function terrenoCadastroForm() {
               data-terreno-path="areaGleba" data-terreno-num="true" />
             <span class="affix">m²</span>
           </div>
-        </div>
-        <div class="field">
-          <label>Arquivo KML</label>
-          <input type="file" accept=".kml,.kmz,application/vnd.google-earth.kml+xml,application/vnd.google-earth.kmz" class="terreno-file-input"
-            onchange="handleKmlUpload(this)" />
-          ${f.kmlNome ? `<div class="muted" style="margin-top:4px">Arquivo selecionado: ${f.kmlNome}</div>` : ""}
         </div>
         <div class="field">
           <label>Quadro visual (imagem + notas)</label>
@@ -2322,17 +2225,70 @@ function terrenosView() {
                     placeholder="Buscar terreno por nome/cidade..." />
                 </div>
               </div>
-              ${filtered.length === 0
-                ? `<div class="muted">Nenhum terreno encontrado para este projeto.</div>`
-                : `<div class="terreno-cards-grid">
-                    ${filtered.map((t) => `
-                      <button class="study-item" style="text-align:left" onclick="selectTerrenoMapa('${t.id}')">
-                        <strong>${t.nome}</strong>
-                        <span>${t.cidade || "—"}${t.estado ? " · " + t.estado : ""}${t.projeto ? " · " + t.projeto : ""}</span>
-                      </button>
-                    `).join("")}
-                  </div>`
-              }
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+                <div class="field">
+                  <label>Projeto</label>
+                  <div class="input-wrap full">
+                    <input class="inp text" type="text" value="${f.projeto}"
+                      oninput="setTerrenoField('projeto',this.value)" placeholder="Ex: Residencial Bela Vista" />
+                  </div>
+                </div>
+                <div class="field">
+                  <label>Etapa</label>
+                  <div class="input-wrap full">
+                    <input class="inp" type="text" inputmode="numeric" value="${f.etapa}"
+                      oninput="setTerrenoField('etapa',this.value.replace(/\\D/g,''))" placeholder="Ex: 1" />
+                  </div>
+                </div>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr .6fr;gap:14px">
+                <div class="field">
+                  <label>Cidade</label>
+                  <div class="input-wrap full">
+                    <input class="inp text" type="text" value="${f.cidade}"
+                      oninput="setTerrenoField('cidade',this.value)" />
+                  </div>
+                </div>
+                <div class="field">
+                  <label>Estado (UF)</label>
+                  <div class="input-wrap full">
+                    <select class="inp" onchange="setTerrenoField('estado',this.value)" style="cursor:pointer">
+                      <option value="">—</option>
+                      ${UF_LIST.map(uf => `<option value="${uf}"${f.estado === uf ? " selected" : ""}>${uf}</option>`).join("")}
+                    </select>
+                  </div>
+                </div>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+                <div class="field">
+                  <label>Área da gleba</label>
+                  <div class="input-wrap full">
+                    <input class="inp" type="text" inputmode="decimal"
+                      value="${f.areaGleba || ""}"
+                      oninput="setTerrenoField('areaGleba',parseFloat(this.value.replace(/\\./g,'').replace(',','.'))||0)" />
+                    <span class="affix">m²</span>
+                  </div>
+                </div>
+                <div class="field">
+                  <label>APP (Preservação Ambiental)</label>
+                  <div class="input-wrap full">
+                    <input class="inp" type="text" inputmode="decimal"
+                      value="${f.areaApp || ""}"
+                      oninput="setTerrenoField('areaApp',parseFloat(this.value.replace(/\\./g,'').replace(',','.'))||0)" />
+                    <span class="affix">m²</span>
+                  </div>
+                </div>
+              </div>
+              <div class="field">
+                <label>Foto da gleba</label>
+                <input type="file" accept="image/*" class="terreno-file-input"
+                  onchange="handleFotoUpload(this)" />
+                ${f.fotoBase64 ? `<div class="terreno-preview"><img class="terreno-thumb-large" src="${f.fotoBase64}" alt="${f.fotoNome}" /></div>` : ""}
+              </div>
+              ${state.terrenoMessage ? `<div class="${state.terrenoMessage.startsWith("Salvo") || state.terrenoMessage.includes("sucesso") ? "notice" : "error"}" style="margin-bottom:10px">${state.terrenoMessage}</div>` : ""}
+              <div class="btn-row">
+                <button class="btn green" onclick="saveTerrenoLocal()">Salvar terreno</button>
+              </div>
             </div>
           </div>
 
@@ -2430,8 +2386,6 @@ function bootApp() {
   window.closeFeedback = closeFeedback;
   window.submitFeedback = submitFeedback;
   window.setTerrenoField = setTerrenoField;
-  window.handleKmlUpload = handleKmlUpload;
-  window.handleFotoUpload = handleFotoUpload;
   window.handleTerrenoBoardUpload = handleTerrenoBoardUpload;
   window.clearTerrenoBoardImage = clearTerrenoBoardImage;
   window.saveTerrenoLocal = saveTerrenoLocal;
