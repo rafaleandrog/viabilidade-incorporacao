@@ -124,6 +124,7 @@ const state = {
   terrenos: loadLocal(STORAGE_KEYS.terrenos, []),
   terrenoForm: { tema: "", nome: "", cidade: "", estado: "", projeto: "", etapa: "", areaGleba: 0, areaApp: 0, fotoBase64: "", fotoNome: "", quadroImagem: "", quadroImagemNome: "", quadroNotas: "", apeloNotas: {}, apeloDetalhes: {} },
   terrenoMessage: "",
+  terrenoSheetMessage: "",
   terrenoTema: null,
   terrenoSearch: "",
   terrenoSelecionadoId: null,
@@ -430,6 +431,9 @@ function setNested(path, value) {
 function setView(view, extra = {}) {
   Object.assign(state, extra);
   state.view = view;
+  if (view === "terrenos") {
+    void loadTerrenosFromSheet();
+  }
   rerender();
 }
 
@@ -1131,6 +1135,56 @@ async function postToAppsScriptWithFallback(actions, payload) {
   }
 
   throw lastError || new Error("Falha ao enviar dados para o Apps Script.");
+}
+
+function normalizeTerrenoFromSheet(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const nome = String(raw.nome || raw.name || "").trim();
+  if (!nome) return null;
+  const id = String(raw.id || raw.terrenoId || `terreno_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`);
+  return {
+    id,
+    timestamp: raw.timestamp || raw.createdAt || new Date().toISOString(),
+    nome,
+    cidade: String(raw.cidade || raw.city || "").trim(),
+    estado: String(raw.estado || raw.uf || "").trim(),
+    projeto: String(raw.projeto || raw.project || "").trim(),
+    etapa: String(raw.etapa || raw.stage || "").trim(),
+    areaGleba: num(raw.areaGleba || raw.gleba || 0),
+    areaApp: num(raw.areaApp || raw.app || 0),
+    fotoBase64: "",
+    fotoNome: "",
+    quadroImagem: "",
+    quadroNotas: String(raw.quadroNotas || raw.notas || "").trim(),
+    apeloNotas: {},
+    apeloDetalhes: {},
+  };
+}
+
+async function loadTerrenosFromSheet() {
+  const actions = ["listTerrenos", "listTerrains", "getTerrenos", "getTerrains"];
+  let lastError = null;
+
+  for (const action of actions) {
+    try {
+      const res = await getFromAppsScript(action);
+      const rows = Array.isArray(res.data) ? res.data : [];
+      const normalized = rows.map(normalizeTerrenoFromSheet).filter(Boolean);
+      state.terrenos = normalized;
+      saveLocal(STORAGE_KEYS.terrenos, state.terrenos);
+      state.terrenoSheetMessage = normalized.length
+        ? `Terrenos carregados da planilha (${normalized.length}).`
+        : "Nenhum terreno encontrado na planilha.";
+      rerender();
+      return normalized;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  state.terrenoSheetMessage = `Erro ao buscar terrenos na planilha: ${lastError ? lastError.message : "ação não suportada no Apps Script."}`;
+  rerender();
+  throw lastError || new Error("Não foi possível carregar terrenos da planilha.");
 }
 
 function openBenchmarks() {
@@ -2074,10 +2128,7 @@ async function saveTerrenoLocal() {
   if (!t.projeto && state.terrenoTema) {
     t.projeto = state.terrenoTema;
   }
-  state.terrenos.push(t);
-  saveLocal(STORAGE_KEYS.terrenos, state.terrenos);
-
-  // Envia para Sheets — foto (base64) fica só no localStorage
+  // Envia para Sheets e só persiste local após confirmação de sucesso.
   try {
     const terrenoPayload = {
       id: t.id,
@@ -2100,9 +2151,13 @@ async function saveTerrenoLocal() {
       status: "ativo",
     };
     await postToAppsScriptWithFallback(["saveTerreno", "saveTerrain"], terrenoPayload);
-    state.terrenoMessage = "Terreno salvo com sucesso.";
+    state.terrenos.push(t);
+    saveLocal(STORAGE_KEYS.terrenos, state.terrenos);
+    state.terrenoMessage = "Terreno salvo na planilha com sucesso.";
   } catch (err) {
-    state.terrenoMessage = "Salvo localmente. Erro ao enviar para a planilha: " + err.message;
+    state.terrenoMessage = "Erro ao salvar terreno na planilha: " + err.message;
+    rerender();
+    return;
   }
 
   state.terrenoForm = { tema: "", nome: "", cidade: "", estado: "", projeto: "", etapa: "", areaGleba: 0, areaApp: 0, fotoBase64: "", fotoNome: "", quadroImagem: "", quadroImagemNome: "", quadroNotas: "", apeloNotas: {}, apeloDetalhes: {} };
@@ -2258,6 +2313,7 @@ function terrenoCadastroForm() {
 }
 
 function terrenosView() {
+  const f = state.terrenoForm;
   if (!state.terrenoTema) {
     return `
       <div class="view">
@@ -2268,6 +2324,7 @@ function terrenosView() {
           </div>
         </div>
         <div class="container">
+          ${state.terrenoSheetMessage ? `<div class="${state.terrenoSheetMessage.startsWith("Erro") ? "error" : "notice"}" style="margin-bottom:12px">${state.terrenoSheetMessage}</div>` : ""}
           <div class="card-grid-2 bottom">
             <div class="section">
               <div class="section-head head-primary">Terrenos</div>
@@ -2331,6 +2388,7 @@ function terrenosView() {
       </div>
 
       <div class="container">
+        ${state.terrenoSheetMessage ? `<div class="${state.terrenoSheetMessage.startsWith("Erro") ? "error" : "notice"}" style="margin-bottom:12px">${state.terrenoSheetMessage}</div>` : ""}
         <div class="terrenos-layout">
           <div class="section">
             <div class="section-head head-primary">Áreas cadastradas (${filtered.length})</div>
@@ -2424,12 +2482,20 @@ function terrenosView() {
   `;
 }
 
-function openTerrenoPicker() {
+async function openTerrenoPicker() {
+  state.sheetMessage = "Carregando terrenos da planilha...";
+  rerender();
+  try {
+    await loadTerrenosFromSheet();
+  } catch {
+    // Mensagem já tratada em loadTerrenosFromSheet
+  }
   if (state.terrenos.length === 0) {
-    state.sheetMessage = "Nenhum terreno cadastrado. Acesse 'Terrenos' na home para adicionar.";
+    state.sheetMessage = "Nenhum terreno encontrado na planilha.";
     rerender();
     return;
   }
+  state.sheetMessage = "";
   state.showTerrenoPickerModal = true;
   rerender();
 }
