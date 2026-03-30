@@ -120,8 +120,8 @@ const state = {
   calc: null,
   savedScenarios: loadLocal(STORAGE_KEYS.scenarios, []),
   benchmarks: loadLocal(STORAGE_KEYS.benchmarks, BENCHMARK_TEMPLATE),
-  terrenos: loadLocal("viab_terrenos", []),
-  terrenoForm: { nome: "", cidade: "", estado: "", projeto: "", etapa: "", areaGleba: 0, areaApp: 0, fotoBase64: "", fotoNome: "", kmlBase64: "", kmlNome: "" },
+  terrenos: loadLocal(STORAGE_KEYS.terrenos, []),
+  terrenoForm: { nome: "", cidade: "", estado: "", projeto: "", etapa: "", areaGleba: 0, areaApp: 0, fotoBase64: "", fotoNome: "", kmlTexto: "", kmlNome: "", quadroImagem: "", quadroImagemNome: "", quadroNotas: "" },
   terrenoMessage: "",
   showTerrenoPickerModal: false,
 };
@@ -1935,7 +1935,7 @@ function rerender() {
   // Init Leaflet maps for terrain cards with KML
   if (state.view === "terrenos") {
     requestAnimationFrame(() => {
-      state.terrenos.forEach(t => { if (t.kmlBase64) initTerrainMap(t); });
+      state.terrenos.forEach(t => { if (t.kmlTexto) initTerrainMap(t); });
     });
   }
 
@@ -1973,13 +1973,6 @@ function setTerrenoField(key, value) {
   rerender();
 }
 
-function handleKmlUpload(input) {
-  const file = input.files[0];
-  if (!file) return;
-  state.terrenoForm.kmlNome = file.name;
-  rerender();
-}
-
 function handleTerrenoBoardUpload(input) {
   const file = input.files[0];
   if (!file) return;
@@ -1997,11 +1990,11 @@ function handleKmlUpload(input) {
   if (!file) return;
   const reader = new FileReader();
   reader.onload = (e) => {
-    state.terrenoForm.kmlBase64 = e.target.result;
+    state.terrenoForm.kmlTexto = e.target.result;
     state.terrenoForm.kmlNome = file.name;
     rerender();
   };
-  reader.readAsDataURL(file);
+  reader.readAsText(file);
 }
 
 function initTerrainMap(terreno) {
@@ -2013,7 +2006,7 @@ function initTerrainMap(terreno) {
     attribution: "© OpenStreetMap contributors",
     maxZoom: 19,
   }).addTo(map);
-  const kmlLayer = omnivore.kml.parse(atob(terreno.kmlBase64.split(",")[1]));
+  const kmlLayer = omnivore.kml.parse(terreno.kmlTexto);
   kmlLayer.addTo(map);
   kmlLayer.on("ready", () => {
     const bounds = kmlLayer.getBounds();
@@ -2028,12 +2021,9 @@ async function saveTerrenoLocal() {
     rerender();
     return;
   }
-  // Colunas enviadas ao Google Sheets (aba "terrenos"):
-  // id, createdAt, nome, cidade, estado, projeto, etapa, areaGleba, areaApp, kmlNome
-  // fotoBase64 e kmlBase64 ficam apenas no localStorage
   const t = {
     id: generateTerrenoId(),
-    createdAt: new Date().toISOString(),
+    timestamp: new Date().toISOString(),
     nome: f.nome.trim(),
     cidade: f.cidade.trim(),
     estado: f.estado,
@@ -2043,22 +2033,37 @@ async function saveTerrenoLocal() {
     areaApp: f.areaApp,
     fotoBase64: f.fotoBase64,
     fotoNome: f.fotoNome,
-    kmlBase64: f.kmlBase64,
+    kmlTexto: f.kmlTexto,
     kmlNome: f.kmlNome,
+    quadroImagem: f.quadroImagem,
+    quadroNotas: f.quadroNotas,
   };
   state.terrenos.push(t);
-  saveLocal("viab_terrenos", state.terrenos);
+  saveLocal(STORAGE_KEYS.terrenos, state.terrenos);
 
-  // Envia para Sheets sem foto/kml (campos grandes demais para célula)
+  // Envia para Sheets — foto (base64) fica só no localStorage
   try {
-    const { fotoBase64: _foto, kmlBase64: _kml, ...semBinarios } = t;
-    await postToAppsScript("saveTerrain", semBinarios);
+    await postToAppsScript("saveTerreno", {
+      id: t.id,
+      timestamp: t.timestamp,
+      nome: t.nome,
+      cidade: t.cidade,
+      uf: t.estado,
+      projeto: t.projeto,
+      etapa: t.etapa,
+      areaGleba: t.areaGleba,
+      kmlNomeArquivo: t.kmlNome,
+      kmlTexto: t.kmlTexto,
+      quadroImagemUrl: "",
+      quadroNotas: t.quadroNotas,
+      status: "ativo",
+    });
     state.terrenoMessage = "Terreno salvo com sucesso.";
   } catch (err) {
     state.terrenoMessage = "Salvo localmente. Erro ao enviar para a planilha: " + err.message;
   }
 
-  state.terrenoForm = { nome: "", cidade: "", estado: "", projeto: "", etapa: "", areaGleba: 0, areaApp: 0, fotoBase64: "", fotoNome: "", kmlBase64: "", kmlNome: "" };
+  state.terrenoForm = { nome: "", cidade: "", estado: "", projeto: "", etapa: "", areaGleba: 0, areaApp: 0, fotoBase64: "", fotoNome: "", kmlTexto: "", kmlNome: "", quadroImagem: "", quadroImagemNome: "", quadroNotas: "" };
   rerender();
 }
 
@@ -2110,7 +2115,7 @@ function terrenoCadastroForm() {
           <span>APP: ${fmt(t.areaApp, 0)} m²</span>
           ${t.etapa ? `<span>Etapa ${t.etapa}</span>` : ""}
         </div>
-        ${t.kmlBase64 ? `<div id="map-${t.id}" class="terreno-card-map"></div>` : ""}
+        ${t.kmlTexto ? `<div id="map-${t.id}" class="terreno-card-map"></div>` : ""}
       </div>
       <button class="terreno-card-del" onclick="removeTerrenoLocal('${t.id}')" title="Remover">✕</button>
     </div>
