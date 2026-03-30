@@ -77,6 +77,7 @@ const state = {
     studyId: "",
     nomeEstudo: "",
     cidade: "",
+    terrenoId: "",
     urban: {
       areaTotal: 0,
       percApp: 0,
@@ -121,8 +122,11 @@ const state = {
   savedScenarios: loadLocal(STORAGE_KEYS.scenarios, []),
   benchmarks: loadLocal(STORAGE_KEYS.benchmarks, BENCHMARK_TEMPLATE),
   terrenos: loadLocal(STORAGE_KEYS.terrenos, []),
-  terrenoForm: { nome: "", cidade: "", estado: "", projeto: "", etapa: "", areaGleba: 0, areaApp: 0, fotoBase64: "", fotoNome: "", quadroImagem: "", quadroImagemNome: "", quadroNotas: "" },
+  terrenoForm: { tema: "", nome: "", cidade: "", estado: "", projeto: "", etapa: "", areaGleba: 0, areaApp: 0, fotoBase64: "", fotoNome: "", quadroImagem: "", quadroImagemNome: "", quadroNotas: "", apeloNotas: {}, apeloDetalhes: {} },
   terrenoMessage: "",
+  terrenoTema: null,
+  terrenoSearch: "",
+  terrenoSelecionadoId: null,
   showTerrenoPickerModal: false,
 };
 
@@ -207,6 +211,7 @@ function getDefaultStudy() {
     studyId: "",
     nomeEstudo: "",
     cidade: "",
+    terrenoId: "",
     urban: {
       areaTotal: 0,
       percApp: 0,
@@ -1773,6 +1778,7 @@ function newStudy() {
     studyId: "EST-001",
     nomeEstudo: "",
     cidade: "",
+    terrenoId: "",
     urban: {
       areaTotal: 0,
       percApp: 0,
@@ -1965,6 +1971,13 @@ const TERRENO_TEMAS = [
   { group: "Novos Negócios", items: ["Vespasiano", "Alto Paraíso"] },
 ];
 
+const APELO_FATORES = [
+  "Localização", "Acesso viário", "Proximidade centros",
+  "Infraestrutura entorno", "Vetor de crescimento", "Topografia",
+  "Condição jurídica", "Potencial de valorização",
+  "Concorrência", "Demanda estrutural",
+];
+
 function generateTerrenoId() {
   return "TER-" + Date.now().toString(36).toUpperCase() + Math.random().toString(36).slice(2, 5).toUpperCase();
 }
@@ -1984,6 +1997,39 @@ function handleTerrenoBoardUpload(input) {
     rerender();
   };
   reader.readAsDataURL(file);
+}
+
+function clearTerrenoBoardImage() {
+  state.terrenoForm.quadroImagem = "";
+  state.terrenoForm.quadroImagemNome = "";
+  rerender();
+}
+
+function handleFotoUpload(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    state.terrenoForm.fotoBase64 = String(e.target.result || "");
+    state.terrenoForm.fotoNome = file.name;
+    rerender();
+  };
+  reader.readAsDataURL(file);
+}
+
+function setTerrenoApelo(fator, nota) {
+  state.terrenoForm.apeloNotas[fator] = nota;
+  rerender();
+}
+
+function setTerrenoApeloDetalhe(fator, texto) {
+  state.terrenoForm.apeloDetalhes[fator] = texto;
+}
+
+function renderStars(fator, nota) {
+  return Array.from({ length: 5 }, (_, i) =>
+    `<span class="apelo-star${i < nota ? " filled" : ""}" onclick="setTerrenoApelo('${fator}',${i + 1})">${i < nota ? "★" : "☆"}</span>`
+  ).join("");
 }
 
 async function saveTerrenoLocal() {
@@ -2007,6 +2053,8 @@ async function saveTerrenoLocal() {
     fotoNome: f.fotoNome,
     quadroImagem: f.quadroImagem,
     quadroNotas: f.quadroNotas,
+    apeloNotas: { ...f.apeloNotas },
+    apeloDetalhes: { ...f.apeloDetalhes },
   };
   state.terrenos.push(t);
   saveLocal(STORAGE_KEYS.terrenos, state.terrenos);
@@ -2031,7 +2079,7 @@ async function saveTerrenoLocal() {
     state.terrenoMessage = "Salvo localmente. Erro ao enviar para a planilha: " + err.message;
   }
 
-  state.terrenoForm = { nome: "", cidade: "", estado: "", projeto: "", etapa: "", areaGleba: 0, areaApp: 0, fotoBase64: "", fotoNome: "", quadroImagem: "", quadroImagemNome: "", quadroNotas: "" };
+  state.terrenoForm = { tema: "", nome: "", cidade: "", estado: "", projeto: "", etapa: "", areaGleba: 0, areaApp: 0, fotoBase64: "", fotoNome: "", quadroImagem: "", quadroImagemNome: "", quadroNotas: "", apeloNotas: {}, apeloDetalhes: {} };
   rerender();
 }
 
@@ -2062,7 +2110,8 @@ function selectTerrenoMapa(id) {
 function terrenoCadastroForm() {
   const f = state.terrenoForm;
   const cards = state.terrenos.map(t => `
-    <div class="terreno-card">
+    <div class="terreno-card${t.id === state.study.terrenoId ? " terreno-card-selected" : ""}">
+      ${t.id === state.study.terrenoId ? `<div class="terreno-card-badge">✔ Em uso no estudo</div>` : ""}
       <div class="terreno-card-img">
         ${t.fotoBase64
           ? `<img src="${t.fotoBase64}" alt="${t.nome}" />`
@@ -2151,8 +2200,30 @@ function terrenoCadastroForm() {
             <textarea class="feedback-text terreno-board-notes" placeholder="Anotações do quadro visual, checklist, ideias de produto, etc." oninput="setTerrenoField('quadroNotas',this.value)">${f.quadroNotas || ""}</textarea>
           </div>
         </div>
-        ${state.terrenoMessage ? `<div class="${state.terrenoMessage.startsWith("Salvo") || state.terrenoMessage.includes("sucesso") ? "notice" : "error"}" style="margin-bottom:10px">${state.terrenoMessage}</div>` : ""}
-        <div class="btn-row">
+        <div class="section-head head-orange" style="margin-top:18px;border-radius:8px 8px 0 0">5. Apelo Comercial do Imóvel</div>
+        <p class="muted" style="font-size:12px;margin:6px 0 10px">Avalie de 1 a 5 estrelas cada fator. A análise considera inserção urbana, infraestrutura local, potencial construtivo e dinâmica econômica da cidade.</p>
+        <table class="apelo-table">
+          <thead>
+            <tr><th>Fator</th><th>Avaliação</th><th>Detalhamento</th></tr>
+          </thead>
+          <tbody>
+            ${APELO_FATORES.map((fator, i) => `
+              <tr class="${i % 2 === 0 ? "apelo-row-a" : "apelo-row-b"}">
+                <td class="apelo-fator">${fator}</td>
+                <td class="apelo-avaliacao">
+                  ${renderStars(fator, f.apeloNotas[fator] || 0)}
+                  <span class="apelo-nota">(${f.apeloNotas[fator] || 0}/5)</span>
+                </td>
+                <td><input class="inp text apelo-detalhe" type="text"
+                  value="${(f.apeloDetalhes[fator] || "").replace(/"/g, "&quot;")}"
+                  oninput="setTerrenoApeloDetalhe('${fator}',this.value)"
+                  placeholder="Descreva..." /></td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+        ${state.terrenoMessage ? `<div class="${state.terrenoMessage.startsWith("Salvo") || state.terrenoMessage.includes("sucesso") ? "notice" : "error"}" style="margin-bottom:10px;margin-top:14px">${state.terrenoMessage}</div>` : ""}
+        <div class="btn-row" style="margin-top:14px">
           <button class="btn green" onclick="saveTerrenoLocal()">Salvar terreno</button>
         </div>
       </div>
@@ -2204,6 +2275,26 @@ function terrenosView() {
   if (!state.terrenoSelecionadoId && selected) {
     state.terrenoSelecionadoId = selected.id;
   }
+  const cards = state.terrenos.map(t => `
+    <div class="terreno-card${t.id === state.study.terrenoId ? " terreno-card-selected" : ""}">
+      ${t.id === state.study.terrenoId ? `<div class="terreno-card-badge">✔ Em uso no estudo</div>` : ""}
+      <div class="terreno-card-img">
+        ${t.fotoBase64
+          ? `<img src="${t.fotoBase64}" alt="${t.nome}" />`
+          : `<div class="terreno-card-no-img">📍</div>`}
+      </div>
+      <div class="terreno-card-body">
+        <div class="terreno-card-title">${t.nome}</div>
+        <div class="terreno-card-sub">${t.cidade}${t.estado ? " · " + t.estado : ""}${t.projeto ? " · " + t.projeto : ""}</div>
+        <div class="terreno-card-meta">
+          <span>Gleba: ${fmt(t.areaGleba, 0)} m²</span>
+          <span>APP: ${fmt(t.areaApp, 0)} m²</span>
+          ${t.etapa ? `<span>Etapa ${t.etapa}</span>` : ""}
+        </div>
+      </div>
+      <button class="terreno-card-del" onclick="removeTerrenoLocal('${t.id}')" title="Remover">✕</button>
+    </div>
+  `).join("");
   return `
     <div class="view">
       <div class="page-header">
@@ -2329,6 +2420,7 @@ function selectTerrenoForStudy(id) {
   if (!t) return;
   if (t.cidade) state.study.cidade = t.cidade;
   if (t.areaGleba) state.study.urban.areaTotal = t.areaGleba;
+  state.study.terrenoId = t.id;
   state.sheetMessage = `Terreno "${t.nome}" aplicado ao estudo.`;
   state.showTerrenoPickerModal = false;
   rerender();
@@ -2388,6 +2480,9 @@ function bootApp() {
   window.setTerrenoField = setTerrenoField;
   window.handleTerrenoBoardUpload = handleTerrenoBoardUpload;
   window.clearTerrenoBoardImage = clearTerrenoBoardImage;
+  window.handleFotoUpload = handleFotoUpload;
+  window.setTerrenoApelo = setTerrenoApelo;
+  window.setTerrenoApeloDetalhe = setTerrenoApeloDetalhe;
   window.saveTerrenoLocal = saveTerrenoLocal;
   window.removeTerrenoLocal = removeTerrenoLocal;
   window.setTerrenoTema = setTerrenoTema;

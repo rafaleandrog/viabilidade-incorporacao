@@ -959,3 +959,65 @@ input[type=number]{-moz-appearance:textfield}
   overflow:hidden;
   border:1px solid var(--border);
 }
+
+/* ── Terreno: badge de seleção ───────────────────────────────────────── */
+.terreno-card-badge{
+  background:var(--green);
+  color:#fff;
+  font-size:10px;
+  font-weight:700;
+  padding:4px 10px;
+  text-align:center;
+  letter-spacing:.3px;
+}
+.terreno-card-selected{
+  border-color:var(--green);
+  box-shadow:0 0 0 2px var(--green);
+}
+
+/* ── Apelo Comercial ─────────────────────────────────────────────────── */
+.apelo-table{
+  width:100%;
+  border-collapse:collapse;
+  font-size:13px;
+  margin-top:8px;
+}
+.apelo-table th{
+  background:#064b59;
+  color:#fff;
+  font-weight:700;
+  padding:7px 10px;
+  text-align:left;
+}
+.apelo-table td{
+  padding:7px 10px;
+  vertical-align:middle;
+  border-bottom:1px solid var(--border);
+}
+.apelo-row-a{background:#f0f7f9;}
+.apelo-row-b{background:#fff;}
+.apelo-fator{
+  font-weight:600;
+  white-space:nowrap;
+  width:170px;
+}
+.apelo-avaliacao{
+  white-space:nowrap;
+  width:150px;
+}
+.apelo-star{
+  font-size:20px;
+  cursor:pointer;
+  color:#d1d5db;
+  line-height:1;
+  transition:color .15s;
+  user-select:none;
+}
+.apelo-star.filled{color:#f59e0b;}
+.apelo-star:hover{color:#f59e0b;}
+.apelo-nota{
+  font-size:12px;
+  color:var(--muted);
+  margin-left:4px;
+}
+.apelo-detalhe{font-size:12px !important;}
