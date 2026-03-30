@@ -2356,7 +2356,6 @@ function terrenosView() {
     `;
   }
 
-  const f = state.terrenoForm;
   const terrenosTema = state.terrenos.filter((t) => t.projeto === state.terrenoTema);
   const filtered = terrenosTema.filter((t) => {
     const q = state.terrenoSearch.trim().toLowerCase();
