@@ -1118,6 +1118,21 @@ async function getFromAppsScript(action, params = {}) {
   return parsed;
 }
 
+async function postToAppsScriptWithFallback(actions, payload) {
+  const actionList = Array.isArray(actions) ? actions : [actions];
+  let lastError = null;
+
+  for (const action of actionList) {
+    try {
+      return await postToAppsScript(action, payload);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError || new Error("Falha ao enviar dados para o Apps Script.");
+}
+
 function openBenchmarks() {
   state.showBenchmarkModal = true;
   state.benchmarkMessage = "";
@@ -1141,7 +1156,7 @@ function saveBenchmarksLocal() {
 async function syncBenchmarksToSheet() {
   try {
     saveLocal(STORAGE_KEYS.benchmarks, state.benchmarks);
-    await postToAppsScript("saveBenchmarks", state.benchmarks);
+    await postToAppsScriptWithFallback(["saveBenchmarks", "saveBenchmark"], state.benchmarks);
     const msg = "Benchmarks enviados para a planilha. Aguarde 1 a 2 segundos e confira a aba benchmarks.";
     state.benchmarkMessage = msg;
     state.sheetMessage = msg;
@@ -2056,24 +2071,35 @@ async function saveTerrenoLocal() {
     apeloNotas: { ...f.apeloNotas },
     apeloDetalhes: { ...f.apeloDetalhes },
   };
+  if (!t.projeto && state.terrenoTema) {
+    t.projeto = state.terrenoTema;
+  }
   state.terrenos.push(t);
   saveLocal(STORAGE_KEYS.terrenos, state.terrenos);
 
   // Envia para Sheets — foto (base64) fica só no localStorage
   try {
-    await postToAppsScript("saveTerreno", {
+    const terrenoPayload = {
       id: t.id,
       timestamp: t.timestamp,
+      createdAt: t.timestamp,
       nome: t.nome,
       cidade: t.cidade,
       uf: t.estado,
+      estado: t.estado,
       projeto: t.projeto,
       etapa: t.etapa,
       areaGleba: t.areaGleba,
+      areaApp: t.areaApp,
+      kmlNomeArquivo: "",
+      kmlNome: "",
       quadroImagemUrl: "",
+      imagemUrl: "",
       quadroNotas: t.quadroNotas,
+      notas: t.quadroNotas,
       status: "ativo",
-    });
+    };
+    await postToAppsScriptWithFallback(["saveTerreno", "saveTerrain"], terrenoPayload);
     state.terrenoMessage = "Terreno salvo com sucesso.";
   } catch (err) {
     state.terrenoMessage = "Salvo localmente. Erro ao enviar para a planilha: " + err.message;
