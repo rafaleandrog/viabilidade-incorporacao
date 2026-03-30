@@ -128,6 +128,7 @@ const state = {
   terrenoSearch: "",
   terrenoSelecionadoId: null,
   showTerrenoPickerModal: false,
+  appsScriptActionCache: {},
 };
 
 function loadLocal(key, fallback) {
@@ -145,6 +146,30 @@ function saveLocal(key, value) {
 
 function clone(v) {
   return JSON.parse(JSON.stringify(v));
+}
+
+function getCachedAction(cacheKey) {
+  return state.appsScriptActionCache[cacheKey] || "";
+}
+
+function setCachedAction(cacheKey, action) {
+  state.appsScriptActionCache[cacheKey] = action;
+}
+
+async function runActionWithCache(cacheKey, actions, executor) {
+  const cached = getCachedAction(cacheKey);
+  const ordered = cached ? [cached, ...actions.filter((a) => a !== cached)] : [...actions];
+  let lastError = null;
+  for (const action of ordered) {
+    try {
+      const result = await executor(action);
+      setCachedAction(cacheKey, action);
+      return result;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError || new Error("Ação não suportada pelo Apps Script.");
 }
 
 function fmt(v, d = 2) {
@@ -601,6 +626,7 @@ function loteamentoView() {
   state.calc = compute(state.study);
   const c = state.calc;
   const bm = state.benchmarks.loteamento || BENCHMARK_TEMPLATE.loteamento;
+  const terrenoVinculado = state.terrenos.find((t) => t.id === state.study.terrenoId);
 
   return `
     <div class="view">
@@ -619,6 +645,24 @@ function loteamentoView() {
       </div>
 
       <div class="container print-area">
+        <div class="field">
+          <label>Selecionar terreno (planilha)</label>
+          <div class="btn-row" style="align-items:center;gap:8px;flex-wrap:wrap">
+            <div class="input-wrap full" style="max-width:780px">
+              <select class="inp" onchange="handleStudyTerrenoChange(this.value)" style="cursor:pointer">
+                <option value="">Selecione…</option>
+                ${state.terrenos.map((t) => `
+                  <option value="${t.id}"${state.study.terrenoId === t.id ? " selected" : ""}>
+                    ${t.nome}${t.cidade ? " · " + t.cidade : ""}${t.estado ? "/" + t.estado : ""}
+                  </option>
+                `).join("")}
+              </select>
+            </div>
+            <button class="btn blue" type="button" onclick="refreshTerrenosForStudy()">Atualizar da planilha</button>
+          </div>
+          ${terrenoVinculado ? `<div class="terreno-tag">📍 Terreno vinculado: <strong>${terrenoVinculado.nome}</strong>${terrenoVinculado.cidade ? ` · ${terrenoVinculado.cidade}` : ""}</div>` : ""}
+        </div>
+
         <div class="field">
           <label>Nome do estudo</label>
           <div class="input-wrap full" style="max-width:780px">
@@ -998,7 +1042,7 @@ function variationBox(a, b) {
 }
 
 function benchmarkModal() {
-  const b = state.benchmarks;
+  const b = normalizeBenchmarks(state.benchmarks);
   return `
     <div class="modal-overlay" onclick="closeBenchmarks(event)">
       <div class="modal" onclick="event.stopPropagation()">
@@ -1029,15 +1073,38 @@ function benchmarkModal() {
 }
 
 function benchmarkCard(type, title, data) {
+  const safe = {
+    urban: {
+      ...BENCHMARK_TEMPLATE[type].urban,
+      ...((data && data.urban) || {}),
+    },
+    financial: {
+      ...BENCHMARK_TEMPLATE[type].financial,
+      ...((data && data.financial) || {}),
+    },
+  };
   return `
     <div class="mini-card">
       <h4>${title}</h4>
-      ${benchmarkInput("Área lotes vendáveis (%)", type, "urban", "areaLotesPct", data.urban.areaLotesPct)}
-      ${benchmarkInput("Margem final / VGV (%)", type, "financial", "margemFinalPct", data.financial.margemFinalPct)}
-      ${benchmarkInput("Margem operacional (%)", type, "financial", "margemOperacionalPct", data.financial.margemOperacionalPct)}
-      ${benchmarkInput("Custo obras / VGV (%)", type, "financial", "custoObrasPct", data.financial.custoObrasPct)}
+      ${benchmarkInput("Área lotes vendáveis (%)", type, "urban", "areaLotesPct", safe.urban.areaLotesPct)}
+      ${benchmarkInput("Margem final / VGV (%)", type, "financial", "margemFinalPct", safe.financial.margemFinalPct)}
+      ${benchmarkInput("Margem operacional (%)", type, "financial", "margemOperacionalPct", safe.financial.margemOperacionalPct)}
+      ${benchmarkInput("Custo obras / VGV (%)", type, "financial", "custoObrasPct", safe.financial.custoObrasPct)}
     </div>
   `;
+}
+
+function normalizeBenchmarks(raw) {
+  const base = clone(BENCHMARK_TEMPLATE);
+  const incoming = raw && typeof raw === "object" ? raw : {};
+  for (const type of Object.keys(base)) {
+    const src = incoming[type] || {};
+    base[type] = {
+      urban: { ...base[type].urban, ...(src.urban || {}) },
+      financial: { ...base[type].financial, ...(src.financial || {}) },
+    };
+  }
+  return base;
 }
 
 function buildPayload() {
@@ -1162,28 +1229,36 @@ function normalizeTerrenoFromSheet(raw) {
 
 async function loadTerrenosFromSheet() {
   const actions = ["listTerrenos", "listTerrains", "getTerrenos", "getTerrains"];
-  let lastError = null;
-
-  for (const action of actions) {
-    try {
-      const res = await getFromAppsScript(action);
-      const rows = Array.isArray(res.data) ? res.data : [];
-      const normalized = rows.map(normalizeTerrenoFromSheet).filter(Boolean);
-      state.terrenos = normalized;
-      saveLocal(STORAGE_KEYS.terrenos, state.terrenos);
-      state.terrenoSheetMessage = normalized.length
-        ? `Terrenos carregados da planilha (${normalized.length}).`
-        : "Nenhum terreno encontrado na planilha.";
-      rerender();
-      return normalized;
-    } catch (error) {
-      lastError = error;
-    }
+  try {
+    const res = await runActionWithCache("get:terrenos", actions, (action) => getFromAppsScript(action));
+    const rows = Array.isArray(res.data) ? res.data : [];
+    const normalized = rows.map(normalizeTerrenoFromSheet).filter(Boolean);
+    state.terrenos = normalized;
+    saveLocal(STORAGE_KEYS.terrenos, state.terrenos);
+    state.terrenoSheetMessage = normalized.length
+      ? `Terrenos carregados da planilha (${normalized.length}).`
+      : "Nenhum terreno encontrado na planilha.";
+    rerender();
+    return normalized;
+  } catch (lastError) {
+    state.terrenoSheetMessage = `Erro ao buscar terrenos na planilha: ${lastError ? lastError.message : "ação não suportada no Apps Script."}`;
+    rerender();
+    throw lastError || new Error("Não foi possível carregar terrenos da planilha.");
   }
+}
 
-  state.terrenoSheetMessage = `Erro ao buscar terrenos na planilha: ${lastError ? lastError.message : "ação não suportada no Apps Script."}`;
-  rerender();
-  throw lastError || new Error("Não foi possível carregar terrenos da planilha.");
+function flattenBenchmarkRows(rows) {
+  const out = {};
+  rows.forEach((row) => {
+    const tipo = String(row.tipo || row.type || "").toLowerCase();
+    if (!tipo || !BENCHMARK_TEMPLATE[tipo]) return;
+    out[tipo] = out[tipo] || { urban: {}, financial: {} };
+    if (row.areaLotesPct != null) out[tipo].urban.areaLotesPct = num(row.areaLotesPct);
+    if (row.margemFinalPct != null) out[tipo].financial.margemFinalPct = num(row.margemFinalPct);
+    if (row.margemOperacionalPct != null) out[tipo].financial.margemOperacionalPct = num(row.margemOperacionalPct);
+    if (row.custoObrasPct != null) out[tipo].financial.custoObrasPct = num(row.custoObrasPct);
+  });
+  return out;
 }
 
 function openBenchmarks() {
@@ -1201,6 +1276,7 @@ function closeBenchmarks(e) {
 }
 
 function saveBenchmarksLocal() {
+  state.benchmarks = normalizeBenchmarks(state.benchmarks);
   saveLocal(STORAGE_KEYS.benchmarks, state.benchmarks);
   state.benchmarkMessage = "Benchmarks salvos com sucesso no navegador.";
   rerender();
@@ -1208,8 +1284,13 @@ function saveBenchmarksLocal() {
 
 async function syncBenchmarksToSheet() {
   try {
+    state.benchmarks = normalizeBenchmarks(state.benchmarks);
     saveLocal(STORAGE_KEYS.benchmarks, state.benchmarks);
-    await postToAppsScriptWithFallback(["saveBenchmarks", "saveBenchmark"], state.benchmarks);
+    await runActionWithCache(
+      "post:saveBenchmarks",
+      ["saveBenchmarks", "saveBenchmark"],
+      (action) => postToAppsScript(action, state.benchmarks),
+    );
     const msg = "Benchmarks enviados para a planilha. Aguarde 1 a 2 segundos e confira a aba benchmarks.";
     state.benchmarkMessage = msg;
     state.sheetMessage = msg;
@@ -1223,9 +1304,15 @@ async function syncBenchmarksToSheet() {
 
 async function loadBenchmarksFromSheet() {
   try {
-    const res = await getFromAppsScript("getBenchmarks");
+    const res = await runActionWithCache(
+      "get:benchmarks",
+      ["getBenchmarks", "listBenchmarks", "getBenchmark"],
+      (action) => getFromAppsScript(action),
+    );
     if (res && res.data) {
-      state.benchmarks = res.data;
+      state.benchmarks = Array.isArray(res.data)
+        ? normalizeBenchmarks(flattenBenchmarkRows(res.data))
+        : normalizeBenchmarks(res.data);
       saveLocal(STORAGE_KEYS.benchmarks, state.benchmarks);
       state.benchmarkMessage = "Benchmarks carregados da planilha com sucesso.";
     } else {
@@ -2157,6 +2244,13 @@ async function saveTerrenoLocal() {
       imagemUrl: "",
       quadroNotas: t.quadroNotas,
       notas: t.quadroNotas,
+      apeloNotas: { ...t.apeloNotas },
+      apeloDetalhes: { ...t.apeloDetalhes },
+      apeloComercial: APELO_FATORES.map((fator) => ({
+        fator,
+        nota: num(t.apeloNotas[fator] || 0),
+        detalhe: String(t.apeloDetalhes[fator] || ""),
+      })),
       status: "ativo",
     };
     await postToAppsScriptWithFallback(["saveTerreno", "saveTerrain"], terrenoPayload);
@@ -2409,6 +2503,29 @@ function terrenosView() {
                     placeholder="Buscar terreno por nome/cidade..." />
                 </div>
               </div>
+              <div class="field">
+                <label>Terrenos disponíveis</label>
+                <div class="terreno-list">
+                  ${filtered.map((t) => `
+                    <button class="study-item ${selected && selected.id === t.id ? "terreno-selected" : ""}" onclick="selectTerrenoMapa('${t.id}')">
+                      <strong>${t.nome}</strong>
+                      <span>${t.cidade || "-"}${t.estado ? " · " + t.estado : ""} · Gleba: ${fmt(t.areaGleba, 0)} m²</span>
+                    </button>
+                  `).join("") || `<div class="muted">Nenhum terreno encontrado para o filtro informado.</div>`}
+                </div>
+              </div>
+              ${selected ? `
+                <div class="highlight" style="margin-top:10px">
+                  <div>
+                    <div class="title">${selected.nome}</div>
+                    <div class="sub">${selected.cidade || "-"}${selected.estado ? " · " + selected.estado : ""}</div>
+                  </div>
+                  <div style="text-align:right">
+                    <div class="val">${fmt(selected.areaGleba, 0)} m²</div>
+                    <div class="sub">APP: ${fmt(selected.areaApp, 0)} m²</div>
+                  </div>
+                </div>
+              ` : ""}
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
                 <div class="field">
                   <label>Projeto</label>
@@ -2480,7 +2597,14 @@ function terrenosView() {
             <div class="section">
               <div class="section-head head-orange">Mapa do terreno</div>
               <div class="section-body">
-                <div id="terreno-project-map" class="terreno-map"></div>
+                <iframe
+                  id="terreno-project-map"
+                  class="terreno-map"
+                  loading="lazy"
+                  referrerpolicy="no-referrer-when-downgrade"
+                  src="${getTerrenoMapEmbedUrl(selected)}"
+                  title="Mapa do terreno selecionado">
+                </iframe>
               </div>
             </div>
           </div>
@@ -2525,6 +2649,36 @@ function selectTerrenoForStudy(id) {
   state.sheetMessage = `Terreno "${t.nome}" aplicado ao estudo.`;
   state.showTerrenoPickerModal = false;
   rerender();
+}
+
+function handleStudyTerrenoChange(id) {
+  if (!id) {
+    state.study.terrenoId = "";
+    rerender();
+    return;
+  }
+  selectTerrenoForStudy(id);
+}
+
+async function refreshTerrenosForStudy() {
+  state.sheetMessage = "Atualizando terrenos da planilha...";
+  rerender();
+  try {
+    await loadTerrenosFromSheet();
+    state.sheetMessage = "Terrenos atualizados com sucesso.";
+  } catch {
+    state.sheetMessage = state.terrenoSheetMessage || "Falha ao atualizar terrenos da planilha.";
+  }
+  rerender();
+}
+
+function getTerrenoMapQuery(terreno) {
+  if (!terreno) return "Brasil";
+  return [terreno.nome, terreno.cidade, terreno.estado].filter(Boolean).join(", ");
+}
+
+function getTerrenoMapEmbedUrl(terreno) {
+  return `https://maps.google.com/maps?q=${encodeURIComponent(getTerrenoMapQuery(terreno))}&z=14&output=embed`;
 }
 
 function terrenoPickerModal() {
@@ -2590,10 +2744,13 @@ function bootApp() {
   window.setTerrenoSearch = setTerrenoSearch;
   window.selectTerrenoMapa = selectTerrenoMapa;
   window.openTerrenoPicker = openTerrenoPicker;
+  window.refreshTerrenosForStudy = refreshTerrenosForStudy;
   window.closeTerrenoPicker = closeTerrenoPicker;
   window.selectTerrenoForStudy = selectTerrenoForStudy;
+  window.handleStudyTerrenoChange = handleStudyTerrenoChange;
 
   try {
+    state.benchmarks = normalizeBenchmarks(state.benchmarks);
     rerender();
   } catch (error) {
     console.error("Erro ao renderizar a aplicação:", error);
