@@ -1207,6 +1207,19 @@ function normalizeTerrenoFromSheet(raw) {
   const nome = String(raw.nome || raw.name || "").trim();
   if (!nome) return null;
   const id = String(raw.id || raw.terrenoId || `terreno_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`);
+
+  // Reconstruct apeloNotas and apeloDetalhes from apeloComercial array (AppScript format)
+  const apeloNotas = {};
+  const apeloDetalhes = {};
+  if (Array.isArray(raw.apeloComercial)) {
+    raw.apeloComercial.forEach(item => {
+      if (item && item.fator) {
+        apeloNotas[item.fator] = Number(item.nota) || 0;
+        apeloDetalhes[item.fator] = String(item.detalhe || "");
+      }
+    });
+  }
+
   return {
     id,
     timestamp: raw.timestamp || raw.createdAt || new Date().toISOString(),
@@ -1221,8 +1234,20 @@ function normalizeTerrenoFromSheet(raw) {
     fotoNome: "",
     quadroImagem: "",
     quadroNotas: String(raw.quadroNotas || raw.notas || "").trim(),
-    apeloNotas: {},
-    apeloDetalhes: {},
+    apeloNotas,
+    apeloDetalhes,
+    lote: String(raw.lote || "").trim(),
+    zona: String(raw.zona || "").trim(),
+    setor: String(raw.setor || "").trim(),
+    codilog: String(raw.codilog || "").trim(),
+    caBas: String(raw.caBas || "N/I").trim(),
+    caMax: String(raw.caMax || "N/I").trim(),
+    gabarito: String(raw.gabarito || "N.A.").trim(),
+    cotaParte: String(raw.cotaParte || "N/I").trim(),
+    incentivo: String(raw.incentivo || "N/I").trim(),
+    valorRef: num(raw.valorRef || 0),
+    viabilidadePct: num(raw.viabilidadePct || 0),
+    coordinates: Array.isArray(raw.coordinates) ? raw.coordinates : [],
   };
 }
 
