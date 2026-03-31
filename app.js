@@ -645,12 +645,23 @@ function loteamentoView() {
         <div class="btn-row">
           <button class="btn gray" onclick="newStudy()">Novo estudo</button>
           <button class="btn blue" onclick="openStudyPicker()">Buscar estudos salvos</button>
-          <button class="btn blue" onclick="openTerrenoPicker()">📍 Selecionar terreno</button>
         </div>
       </div>
 
       <div class="container print-area">
-        ${terrenoVinculado ? `<div class="terreno-tag" style="margin-bottom:8px">📍 Terreno vinculado: <strong>${terrenoVinculado.nome}</strong>${terrenoVinculado.cidade ? ` · ${terrenoVinculado.cidade}` : ""}</div>` : ""}
+        <div class="field">
+          <label>Terreno (planilha)</label>
+          <div class="btn-row" style="align-items:center;gap:8px;flex-wrap:wrap">
+            <div class="input-wrap full" style="max-width:720px">
+              <select class="inp" onchange="handleStudyTerrenoChange(this.value)" style="cursor:pointer">
+                <option value="">— Selecione um terreno —</option>
+                ${state.terrenos.map((t) => `<option value="${t.id}"${state.study.terrenoId === t.id ? " selected" : ""}>${t.nome}${t.cidade ? ` · ${t.cidade}` : ""}</option>`).join("")}
+              </select>
+            </div>
+            <button class="btn blue" type="button" onclick="refreshTerrenosForStudy()">↻ Atualizar</button>
+          </div>
+          ${terrenoVinculado ? `<div class="terreno-tag" style="margin-top:6px">📍 Terreno vinculado: <strong>${terrenoVinculado.nome}</strong>${terrenoVinculado.cidade ? ` · ${terrenoVinculado.cidade}` : ""}</div>` : ""}
+        </div>
         <div class="field">
           <label>Nome do estudo</label>
           <div class="input-wrap full" style="max-width:780px">
@@ -2116,6 +2127,9 @@ function rerender() {
     if (!el && savedPath.startsWith("terreno:")) {
       el = document.querySelector(`[data-terreno-path="${savedPath.slice(8)}"]`);
     }
+    if (!el && savedPath === "_search") {
+      el = document.getElementById("terreno-search-inp");
+    }
     if (el) {
       el.focus();
       if (savedCursor !== null) {
@@ -2304,6 +2318,8 @@ function setTerrenoTema(tema) {
 }
 
 function setTerrenoSearch(v) {
+  _activePath = "_search";
+  _activeRaw = v || "";
   state.terrenoSearch = v || "";
   rerender();
 }
@@ -2352,7 +2368,9 @@ function terrenoCadastroForm() {
         <div class="field">
           <label>Etapa</label>
           <div class="input-wrap full">
-            <input class="inp" type="number" min="0" step="1" value="${f.etapa || ""}" oninput="setTerrenoField('etapa',this.value.replace(/\\D/g,''))" />
+            <input class="inp text" type="text" inputmode="numeric"
+              value="${_activePath === 'terreno:etapa' ? _activeRaw : (f.etapa || '')}"
+              data-terreno-path="etapa" data-terreno-digits="true" placeholder="Ex: 1" />
           </div>
         </div>
         <div class="field">
@@ -2428,14 +2446,14 @@ function terrenoCadastroForm() {
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
           <div class="field"><label>VGV de referência (R$)</label>
             <div class="input-wrap full"><input class="inp" type="text" inputmode="decimal"
-              value="${f.valorRef ? fmtBR(f.valorRef) : ''}"
-              oninput="setTerrenoField('valorRef', parseFloat(this.value.replace(/\\./g,'').replace(',','.'))||0)"
+              value="${_activePath === 'terreno:valorRef' ? _activeRaw : (f.valorRef ? fmtBR(f.valorRef) : '')}"
+              data-terreno-path="valorRef" data-terreno-num="true"
               placeholder="0,00" /></div>
           </div>
           <div class="field"><label>Viabilidade (%)</label>
             <div class="input-wrap full"><input class="inp" type="text" inputmode="decimal"
-              value="${f.viabilidadePct ? fmtBR(f.viabilidadePct) : ''}"
-              oninput="setTerrenoField('viabilidadePct', parseFloat(this.value.replace(/\\./g,'').replace(',','.'))||0)"
+              value="${_activePath === 'terreno:viabilidadePct' ? _activeRaw : (f.viabilidadePct ? fmtBR(f.viabilidadePct) : '')}"
+              data-terreno-path="viabilidadePct" data-terreno-num="true"
               placeholder="0,00" /><span class="affix">%</span></div>
           </div>
         </div>
@@ -2638,7 +2656,7 @@ function terrenosView() {
             </button>
           </div>
           <div style="margin-top:10px">
-            <input class="inp text mapa-search" type="text" value="${state.terrenoSearch}"
+            <input id="terreno-search-inp" class="inp text mapa-search" type="text" value="${state.terrenoSearch}"
               oninput="setTerrenoSearch(this.value)"
               placeholder="Buscar terreno..." />
           </div>
