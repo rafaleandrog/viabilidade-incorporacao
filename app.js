@@ -2086,8 +2086,10 @@ function attachEvents() {
     });
   });
 
-  // Initialize deck.gl map when on terrenos tema view
-  if (state.view === "terrenos" && state.terrenoTema) {
+  // Initialize deck.gl map when on terrenos map view
+  if (state.view === "terrenos" && state.terrenoTema !== null) {
+    // terrenoTema can be a string or undefined; show map whenever it is not the "home" state
+    // (home state = !terrenoTema AND view is terrenos without a topic)
     setTimeout(initDeckMap, 0);
   } else {
     destroyDeckMap();
@@ -2506,14 +2508,11 @@ function terrenosView() {
               <div class="section-head head-primary">Terrenos</div>
               <div class="section-body">
                 <p class="muted" style="margin-bottom:14px">Selecione um projeto para abrir a visualização em mapa.</p>
-                ${TERRENO_TEMAS.map(group => `
-                  <div class="terreno-group">
-                    <h4>${group.group}</h4>
-                    <div class="btn-row">
-                      ${group.items.map(item => `<button class="btn blue" onclick="setTerrenoTema('${item}')">${item}</button>`).join("")}
-                    </div>
-                  </div>
-                `).join("")}
+                <div style="display:flex;flex-direction:column;gap:10px">
+                  <button class="btn blue" style="justify-content:flex-start;padding:14px 20px;font-size:15px;border-radius:10px" onclick="setTerrenoTema('Regularização')">Regularização</button>
+                  <button class="btn blue" style="justify-content:flex-start;padding:14px 20px;font-size:15px;border-radius:10px" onclick="setTerrenoTema('Urbitá')">Urbitá</button>
+                  <button class="btn blue" style="justify-content:flex-start;padding:14px 20px;font-size:15px;border-radius:10px" onclick="setTerrenoTema('Novos Negócios')">Novos Negócios</button>
+                </div>
               </div>
             </div>
             ${terrenoCadastroForm()}
@@ -2523,16 +2522,22 @@ function terrenosView() {
     `;
   }
 
-  const terrenosTema = state.terrenos.filter((t) => t.projeto === state.terrenoTema);
+  const terrenosTema = state.terrenos.filter((t) => {
+    const tema = state.terrenoTema;
+    if (!tema) return true;
+    if (tema === "Novos Negócios") return t.projeto !== "Regularização" && t.projeto !== "Urbitá";
+    return t.projeto === tema;
+  });
   const q = (state.terrenoSearch || "").trim().toLowerCase();
   const filtered = q
     ? terrenosTema.filter(t => `${t.nome} ${t.cidade || ""}`.toLowerCase().includes(q))
     : terrenosTema;
 
-  if (!state.terrenoSelecionadoId && filtered.length > 0) {
-    state.terrenoSelecionadoId = filtered[0].id;
+  // Validate selection — clear if no longer in filtered set (category switched)
+  if (state.terrenoSelecionadoId && !filtered.find(t => t.id === state.terrenoSelecionadoId)) {
+    state.terrenoSelecionadoId = null;
   }
-  const sel = filtered.find(t => t.id === state.terrenoSelecionadoId) || filtered[0] || null;
+  const sel = filtered.find(t => t.id === state.terrenoSelecionadoId) || null;
 
   // ── Panel body ───────────────────────────────────────────────────────────────
   const pav = (_mapPavimentos[sel && sel.id] || 4);
@@ -2550,28 +2555,37 @@ function terrenosView() {
     return `<div class="mapa-g2">${mVbox(lbl1, v1)}${mVbox(lbl2, v2)}</div>`;
   }
 
+  const MAPA_CATS = ["Regularização", "Urbitá", "Novos Negócios"];
+
   let painelBody = "";
   if (!sel) {
+    // No terreno selected — show category filter buttons
     painelBody = `
-      <div style="text-align:center;padding:60px 20px;color:#9ca3af">
-        <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin:0 auto 14px;opacity:.35;display:block">
-          <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/>
-        </svg>
-        <p style="margin:0 0 16px;font-size:14px">Nenhum terreno cadastrado neste projeto.</p>
-        <button class="btn blue" onclick="setTerrenoTema(null)">← Voltar e cadastrar</button>
+      <div class="mapa-filter-panel">
+        <p style="color:#6b7280;font-size:12px;margin:0 0 16px;font-weight:500">Clique em uma categoria para filtrar os terrenos no mapa, depois selecione um lote.</p>
+        <div class="mapa-filter-btns">
+          ${MAPA_CATS.map(cat => `
+            <button class="mapa-filter-btn${state.terrenoTema === cat ? " active" : ""}" onclick="setTerrenoTema('${cat}')">
+              ${cat}
+            </button>`).join("")}
+        </div>
+        ${filtered.length > 0 ? `
+          <div style="margin-top:20px;border-top:1px solid #e5e7eb;padding-top:14px">
+            <p style="color:#6b7280;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.4px;margin:0 0 8px">${filtered.length} terreno${filtered.length !== 1 ? "s" : ""} disponível${filtered.length !== 1 ? "eis" : ""}</p>
+            <div class="mapa-lista">
+              ${filtered.map(t => `
+                <button class="mapa-lista-item" onclick="mapaSelectTerreno('${t.id}')">
+                  <span class="mapa-lista-nome">${t.nome}</span>
+                  <span class="mapa-lista-sub">${t.cidade || ""}${t.etapa ? " · Et. " + t.etapa : ""}</span>
+                </button>`).join("")}
+            </div>
+          </div>` : (state.terrenoTema ? `<p style="color:#9ca3af;font-size:13px;margin-top:20px;text-align:center">Nenhum terreno cadastrado nesta categoria.</p>` : "")}
       </div>`;
   } else {
-    const listItems = filtered.length > 1 ? `
-      <div class="mapa-lista">
-        ${filtered.map(t => `
-          <button class="mapa-lista-item${t.id === sel.id ? " active" : ""}" onclick="mapaSelectTerreno('${t.id}')">
-            <span class="mapa-lista-nome">${t.nome}</span>
-            <span class="mapa-lista-sub">${t.cidade || ""}${t.etapa ? " · Et. " + t.etapa : ""}</span>
-          </button>`).join("")}
-      </div>` : "";
-
     painelBody = `
-      ${listItems}
+      <div style="padding:10px 16px;border-bottom:1px solid #e5e7eb">
+        <button onclick="mapaSelectTerreno(null)" style="background:none;border:none;color:#2d5f52;cursor:pointer;font-size:13px;font-weight:600;padding:4px 0;display:flex;align-items:center;gap:4px">← Voltar</button>
+      </div>
       <div class="mapa-pb-inner">
         <div class="mapa-sec">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#2d5f52" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
@@ -2588,8 +2602,6 @@ function terrenosView() {
           </div>
         </div>
         ${mVbox("GABARITO DE ALTURA", sel.gabarito || "N.A.")}
-        ${mVbox("COTA PARTE", sel.cotaParte || "N/I")}
-        ${mVbox("INCENTIVOS", sel.incentivo || "N/I")}
 
         <div class="mapa-sec" style="margin-top:20px">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#2d5f52" stroke-width="2"><rect x="2" y="7" width="20" height="15" rx="2"/><polyline points="17 2 12 7 7 2"/></svg>
@@ -2614,26 +2626,6 @@ function terrenosView() {
           </div>
         </div>
 
-        <div class="mapa-card-dark">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
-            <div>
-              <div style="color:rgba(255,255,255,.7);font-size:11px;font-weight:600;margin-bottom:3px">ROI</div>
-              <div style="color:#fff;font-size:16px;font-weight:700">${fmt(viab * 1.2, 1)}%</div>
-            </div>
-            <div style="text-align:right">
-              <div style="color:rgba(255,255,255,.7);font-size:11px;font-weight:600;margin-bottom:3px">VGV</div>
-              <div style="color:#fff;font-size:16px;font-weight:700">R$ ${fmt(vgv, 0)}</div>
-            </div>
-          </div>
-          <div style="border-top:1px solid rgba(255,255,255,.2);padding-top:14px">
-            <div style="color:rgba(255,255,255,.9);font-size:12px;font-weight:600;margin-bottom:10px">Indicadores</div>
-            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
-              <div><div style="color:rgba(255,255,255,.6);font-size:10px;margin-bottom:3px">Viabilidade</div><div style="color:#fff;font-size:14px;font-weight:700">${fmt(viab, 1)}%</div></div>
-              <div><div style="color:rgba(255,255,255,.6);font-size:10px;margin-bottom:3px">Margem</div><div style="color:#fff;font-size:14px;font-weight:700">${fmt(viab * 0.8, 1)}%</div></div>
-              <div><div style="color:rgba(255,255,255,.6);font-size:10px;margin-bottom:3px">Lucro</div><div style="color:#10b981;font-size:14px;font-weight:700">${fmt(viab * 1.5, 1)}%</div></div>
-            </div>
-          </div>
-        </div>
       </div>`;
   }
 
@@ -2641,25 +2633,19 @@ function terrenosView() {
     <div class="mapa-fullscreen">
       <div class="mapa-painel" id="mapa-painel">
         <div class="mapa-painel-header">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.65)" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
-            <span style="color:rgba(255,255,255,.7);font-size:11px;font-weight:600">Estudo de Viabilidade</span>
-          </div>
-          <div style="display:flex;align-items:center;justify-content:space-between">
-            <h2 style="margin:0;font-size:17px;font-weight:700;color:#fff">
-              ${sel ? sel.nome : state.terrenoTema}
-              ${filtered.length > 1 ? `<span class="badge" style="font-size:11px;padding:2px 8px;border-radius:12px;background:rgba(255,255,255,.25);margin-left:8px">${filtered.length}</span>` : ""}
-            </h2>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+            <div>
+              <div style="color:rgba(255,255,255,.6);font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">Terrenos</div>
+              <h2 style="margin:0;font-size:16px;font-weight:700;color:#fff">${sel ? sel.nome : (state.terrenoTema || "Projetos")}</h2>
+            </div>
             <button onclick="setTerrenoTema(null)"
-              style="background:rgba(255,255,255,.15);border:none;color:#fff;width:30px;height:30px;border-radius:6px;cursor:pointer;font-size:18px;line-height:1;flex-shrink:0">
+              style="background:rgba(255,255,255,.15);border:none;color:#fff;width:30px;height:30px;border-radius:8px;cursor:pointer;font-size:18px;line-height:1;flex-shrink:0">
               &times;
             </button>
           </div>
-          <div style="margin-top:10px">
-            <input id="terreno-search-inp" class="inp text mapa-search" type="text" value="${state.terrenoSearch}"
-              oninput="setTerrenoSearch(this.value)"
-              placeholder="Buscar terreno..." />
-          </div>
+          <input id="terreno-search-inp" class="inp text mapa-search" type="text" value="${state.terrenoSearch}"
+            oninput="setTerrenoSearch(this.value)"
+            placeholder="Buscar terreno..." />
         </div>
         <div class="mapa-painel-body">
           ${painelBody}
@@ -2667,10 +2653,6 @@ function terrenosView() {
       </div>
 
       <div id="terreno-project-map" class="mapa-canvas"></div>
-
-      <button class="mapa-fab" id="mapa-btn3d" onclick="toggleMapa3D()">
-        ${_mapIs3D ? "Vista 2D" : "Vista 3D"}
-      </button>
     </div>
   `;
 }
@@ -2678,7 +2660,7 @@ function terrenosView() {
 // ─── Mapa deck.gl ──────────────────────────────────────────────────────────────
 
 function mapaSelectTerreno(id) {
-  state.terrenoSelecionadoId = id;
+  state.terrenoSelecionadoId = id || null;
   rerender();
 }
 
@@ -2715,8 +2697,11 @@ function destroyDeckMap() {
 function makeMapLayers() {
   if (typeof deck === "undefined") return [];
   const tema = state.terrenoTema;
-  if (!tema) return [];
-  const terrenos = state.terrenos.filter(t => t.projeto === tema);
+  const terrenos = state.terrenos.filter(t => {
+    if (!tema) return true;
+    if (tema === "Novos Negócios") return t.projeto !== "Regularização" && t.projeto !== "Urbitá";
+    return t.projeto === tema;
+  });
   const features = terrenos
     .filter(t => t.coordinates && t.coordinates.length > 2)
     .map(t => ({ id: t.id, nome: t.nome, polygon: t.coordinates }));
@@ -2729,8 +2714,8 @@ function makeMapLayers() {
     data: features,
     extruded: false,
     getPolygon: d => d.polygon,
-    getFillColor: d => d.id === selId ? [134, 239, 172, 200] : [45, 95, 82, 180],
-    getLineColor: d => d.id === selId ? [22, 163, 74, 255] : [45, 95, 82, 255],
+    getFillColor: d => d.id === selId ? [22, 163, 74, 220] : [255, 140, 0, 200],
+    getLineColor: d => d.id === selId ? [15, 120, 55, 255] : [200, 100, 0, 255],
     getLineWidth: d => d.id === selId ? 3 : 1.5,
     lineWidthMinPixels: 1,
     pickable: true,
@@ -2780,7 +2765,12 @@ function initDeckMap() {
   destroyDeckMap();
 
   const tema = state.terrenoTema;
-  const terrenos = tema ? state.terrenos.filter(t => t.projeto === tema && t.coordinates && t.coordinates.length > 2) : [];
+  const terrenos = state.terrenos.filter(t => {
+    if (!t.coordinates || t.coordinates.length < 3) return false;
+    if (!tema) return true;
+    if (tema === "Novos Negócios") return t.projeto !== "Regularização" && t.projeto !== "Urbitá";
+    return t.projeto === tema;
+  });
   let centerLon = -47.8220, centerLat = -15.6581, zoom = 13;
   if (terrenos.length > 0) {
     const allLons = terrenos.flatMap(t => t.coordinates.map(c => c[0]));
