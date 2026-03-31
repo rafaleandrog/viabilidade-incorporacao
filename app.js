@@ -71,6 +71,7 @@ const state = {
   sheetStudies: [],
   showFeedbackModal: false,
   feedbackType: "sugestao",
+  feedbackNome: "",
   feedbackText: "",
   feedbackMessage: "",
   study: {
@@ -649,24 +650,7 @@ function loteamentoView() {
       </div>
 
       <div class="container print-area">
-        <div class="field">
-          <label>Selecionar terreno (planilha)</label>
-          <div class="btn-row" style="align-items:center;gap:8px;flex-wrap:wrap">
-            <div class="input-wrap full" style="max-width:780px">
-              <select class="inp" onchange="handleStudyTerrenoChange(this.value)" style="cursor:pointer">
-                <option value="">Selecione…</option>
-                ${state.terrenos.map((t) => `
-                  <option value="${t.id}"${state.study.terrenoId === t.id ? " selected" : ""}>
-                    ${t.nome}${t.cidade ? " · " + t.cidade : ""}${t.estado ? "/" + t.estado : ""}
-                  </option>
-                `).join("")}
-              </select>
-            </div>
-            <button class="btn blue" type="button" onclick="refreshTerrenosForStudy()">Atualizar da planilha</button>
-          </div>
-          ${terrenoVinculado ? `<div class="terreno-tag">📍 Terreno vinculado: <strong>${terrenoVinculado.nome}</strong>${terrenoVinculado.cidade ? ` · ${terrenoVinculado.cidade}` : ""}</div>` : ""}
-        </div>
-
+        ${terrenoVinculado ? `<div class="terreno-tag" style="margin-bottom:8px">📍 Terreno vinculado: <strong>${terrenoVinculado.nome}</strong>${terrenoVinculado.cidade ? ` · ${terrenoVinculado.cidade}` : ""}</div>` : ""}
         <div class="field">
           <label>Nome do estudo</label>
           <div class="input-wrap full" style="max-width:780px">
@@ -1430,11 +1414,13 @@ async function submitFeedback() {
     await postToAppsScript("saveFeedback", {
       timestamp: new Date().toISOString(),
       tipo: state.feedbackType,
+      nome: state.feedbackNome.trim(),
       texto: state.feedbackText.trim(),
       studyId: state.study.studyId || "",
       projectType: state.projectType || "",
     });
     state.feedbackMessage = "Feedback enviado com sucesso. Obrigado!";
+    state.feedbackNome = "";
     state.feedbackText = "";
   } catch (err) {
     state.feedbackMessage = `Erro ao enviar feedback: ${err.message}`;
@@ -1465,6 +1451,8 @@ function feedbackModal() {
           `).join("")}
         </div>
         <div class="spacer"></div>
+        <input class="inp text" type="text" placeholder="Seu nome (opcional)"
+          value="${state.feedbackNome}" oninput="state.feedbackNome=this.value" style="margin-bottom:8px" />
         <textarea class="feedback-text" rows="5" placeholder="Descreva aqui..."
           oninput="state.feedbackText=this.value">${state.feedbackText}</textarea>
         <div class="spacer"></div>
@@ -2274,6 +2262,17 @@ async function saveTerrenoLocal() {
         nota: num(t.apeloNotas[fator] || 0),
         detalhe: String(t.apeloDetalhes[fator] || ""),
       })),
+      lote: t.lote || "",
+      zona: t.zona || "",
+      setor: t.setor || "",
+      codilog: t.codilog || "",
+      caBas: t.caBas || "N/I",
+      caMax: t.caMax || "N/I",
+      gabarito: t.gabarito || "N.A.",
+      cotaParte: t.cotaParte || "N/I",
+      incentivo: t.incentivo || "N/I",
+      valorRef: num(t.valorRef || 0),
+      viabilidadePct: num(t.viabilidadePct || 0),
       status: "ativo",
     };
     await postToAppsScriptWithFallback(["saveTerreno", "saveTerrain"], terrenoPayload);
@@ -2390,21 +2389,6 @@ function terrenoCadastroForm() {
               value="${_activePath === 'terreno:areaGleba' ? _activeRaw : (f.areaGleba ? fmtBR(f.areaGleba) : '')}"
               data-terreno-path="areaGleba" data-terreno-num="true" />
             <span class="affix">m²</span>
-          </div>
-        </div>
-        <div class="field">
-          <label>Quadro visual (imagem + notas)</label>
-          <div class="terreno-board">
-            <div class="terreno-board-media">
-              <input id="terreno-board-upload" type="file" accept="image/*" class="terreno-board-upload-input" onchange="handleTerrenoBoardUpload(this)" />
-              <label for="terreno-board-upload" class="terreno-board-dropzone">
-                ${f.quadroImagem
-                  ? `<img src="${f.quadroImagem}" alt="Prévia do quadro do terreno" class="terreno-board-image" />`
-                  : `<div><strong>Adicionar imagem do terreno</strong><span>Arraste ou clique para carregar uma referência visual (Notion/Trello style).</span></div>`}
-              </label>
-              ${f.quadroImagem ? `<div class="btn-row" style="margin-top:8px"><button class="btn gray" type="button" onclick="clearTerrenoBoardImage()">Remover imagem</button></div>` : ""}
-            </div>
-            <textarea class="feedback-text terreno-board-notes" placeholder="Anotações do quadro visual, checklist, ideias de produto, etc." oninput="setTerrenoField('quadroNotas',this.value)">${f.quadroNotas || ""}</textarea>
           </div>
         </div>
         <div class="section-head head-primary" style="margin-top:18px;border-radius:8px 8px 0 0">4. Legislação Urbanística</div>
